@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use lmntal_compiler::{lexing::Lexer, source_code::SourceCode};
+use lmntalc::{lexing::Lexer, source_code::SourceCode};
 
 #[derive(Parser)]
 #[command(name = "LMNtal Compiler")]

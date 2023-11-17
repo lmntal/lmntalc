@@ -1,3 +1,0 @@
-a, b, c.
-hello(X) :- X = 1.
-test @@ 1234 : b,c.

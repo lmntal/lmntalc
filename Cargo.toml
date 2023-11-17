@@ -1,5 +1,10 @@
 [package]
-name = "lmntal-compiler"
+name = "lmntalc"
+authors = ["QRWells <qirui.wang@moegi.waseda.jp>"]
+license = "MIT"
+description = "A compiler for the LMNtal language"
+readme = "README.md"
+repository = "https://github.com/QRWells/lmntalc"
 version = "0.1.0"
 edition = "2021"
 
