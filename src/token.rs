@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::util::Span;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum TokenKind {
     // Literals
@@ -40,37 +40,12 @@ pub enum TokenKind {
     RightBracket,
     LeftBrace,
     RightBrace,
+
+    EOF,
 }
 
 /// Keywords in LMNtal.
 pub const KEYWORD: [&str; 5] = ["int", "float", "ground", "unary", "uniq"];
-
-impl TokenKind {
-    fn to_string(&self) -> String {
-        match self {
-            TokenKind::Identifier(i) => i.clone(),
-            TokenKind::Int(i) => i.to_string(),
-            TokenKind::Float(f) => f.to_string(),
-            TokenKind::String(s) => s.clone(),
-            TokenKind::Operator(o) => o.clone(),
-            TokenKind::Keyword(k) => k.clone(),
-            TokenKind::AtAt => "@@".to_string(),
-            TokenKind::ColonDash => ":-".to_string(),
-            TokenKind::Comma => ",".to_string(),
-            TokenKind::Dot => ".".to_string(),
-            TokenKind::Vert => "|".to_string(),
-            TokenKind::Bang => "!".to_string(),
-            TokenKind::Dollar => "$".to_string(),
-            TokenKind::Equal => "=".to_string(),
-            TokenKind::LeftParen => "(".to_string(),
-            TokenKind::RightParen => ")".to_string(),
-            TokenKind::LeftBracket => "[".to_string(),
-            TokenKind::RightBracket => "]".to_string(),
-            TokenKind::LeftBrace => "{".to_string(),
-            TokenKind::RightBrace => "}".to_string(),
-        }
-    }
-}
 
 impl Display for TokenKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -81,7 +56,21 @@ impl Display for TokenKind {
             TokenKind::String(s) => write!(f, "{}", s),
             TokenKind::Operator(o) => write!(f, "{}", o),
             TokenKind::Keyword(k) => write!(f, "{}", k),
-            _ => write!(f, "{}", self.to_string()),
+            TokenKind::AtAt => write!(f, "@@"),
+            TokenKind::ColonDash => write!(f, ":-"),
+            TokenKind::Comma => write!(f, ","),
+            TokenKind::Dot => write!(f, "."),
+            TokenKind::Vert => write!(f, "|"),
+            TokenKind::Bang => write!(f, "!"),
+            TokenKind::Dollar => write!(f, "$"),
+            TokenKind::Equal => write!(f, "="),
+            TokenKind::LeftParen => write!(f, "("),
+            TokenKind::RightParen => write!(f, ")"),
+            TokenKind::LeftBracket => write!(f, "["),
+            TokenKind::RightBracket => write!(f, "]"),
+            TokenKind::LeftBrace => write!(f, "{{"),
+            TokenKind::RightBrace => write!(f, "}}"),
+            TokenKind::EOF => write!(f, "<EOF>"),
         }
     }
 }
@@ -130,6 +119,20 @@ impl From<f64> for TokenKind {
     }
 }
 
+impl PartialEq for TokenKind {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Identifier(_), Self::Identifier(_)) => true,
+            (Self::Int(_), Self::Int(_)) => true,
+            (Self::Float(_), Self::Float(_)) => true,
+            (Self::String(_), Self::String(_)) => true,
+            (Self::Operator(_), Self::Operator(_)) => true,
+            (Self::Keyword(_), Self::Keyword(_)) => true,
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+        }
+    }
+}
+
 /// A valid token in LMNtal.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Token {
@@ -147,6 +150,13 @@ impl Token {
         let kind = kind.into();
         Token { span, kind }
     }
+
+    pub const fn eof() -> Token {
+        Token {
+            span: Span::dummy(),
+            kind: TokenKind::EOF,
+        }
+    }
 }
 
 impl<T> From<T> for Token
@@ -155,5 +165,11 @@ where
 {
     fn from(other: T) -> Token {
         Token::new(Span::dummy(), other)
+    }
+}
+
+impl Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<{}>", self.kind)
     }
 }

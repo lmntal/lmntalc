@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use lmntalc::{lexing::Lexer, source_code::SourceCode};
+use lmntalc::{parsing, source_code::SourceCode};
 
 #[derive(Parser)]
 #[command(name = "LMNtal Compiler")]
@@ -23,13 +23,7 @@ fn main() {
     }
 
     let code = SourceCode::new(&cli.source);
-
-    println!("{:#?}", code);
-
-    let mut lexer = Lexer::new(&code);
-    let result = lexer.lex();
-
-    for token in result.tokens {
-        print!("{}", token.kind);
-    }
+    let mut parser = parsing::Parser::new(&code);
+    let res = parser.parse();
+    println!("{:#?}", res);
 }

@@ -82,6 +82,10 @@ impl Span {
         (self.high - self.low) as usize
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Create a span that encloses both `self` and `other`.
     pub fn merge(&self, other: Span) -> Span {
         Span {
@@ -90,7 +94,7 @@ impl Span {
         }
     }
 
-    pub fn dummy() -> Self {
+    pub const fn dummy() -> Self {
         Self {
             low: Pos(0),
             high: Pos(0),

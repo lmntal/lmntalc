@@ -25,7 +25,16 @@ pub enum LexErrorType {
 pub struct LexError {
     pub offset: usize,
     pub ty: LexErrorType,
-    pub recoverable: Option<TokenKind>,
+    pub recoverable: Option<(TokenKind, usize)>,
+}
+
+impl LexError {
+    pub fn try_recover(&self, kind: TokenKind) -> bool {
+        match &self.recoverable {
+            Some(k) => k.0 == kind,
+            None => false,
+        }
+    }
 }
 
 // Basic lexer functions
@@ -213,7 +222,7 @@ impl<'src> Lexer<'src> {
                         _ => Err(LexError {
                             offset: self.offset,
                             ty: LexErrorType::Expected('@'),
-                            recoverable: Some(TokenKind::AtAt),
+                            recoverable: Some((TokenKind::AtAt, tokens.len())),
                         }),
                     }
                 }
@@ -230,7 +239,7 @@ impl<'src> Lexer<'src> {
                         _ => Err(LexError {
                             offset: self.offset,
                             ty: LexErrorType::Expected('-'),
-                            recoverable: Some(TokenKind::ColonDash),
+                            recoverable: Some((TokenKind::ColonDash, tokens.len())),
                         }),
                     }
                 }
@@ -277,10 +286,6 @@ impl<'src> Lexer<'src> {
                 eprintln!("{}:{}:{}: uncomplete string", self.source.name(), line, col);
             }
         }
-    }
-
-    pub fn try_recover(&mut self, err: LexError) {
-        todo!()
     }
 }
 
