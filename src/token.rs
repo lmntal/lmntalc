@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::util::Span;
 
+/// Tokens in LMNtal.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum TokenKind {
@@ -32,6 +33,59 @@ pub enum TokenKind {
     Dollar,
     /// `=`
     Equal,
+
+    /// Integer addition (`+`)
+    IAdd,
+    /// Integer subtraction (`-`)
+    ISub,
+    /// Integer multiplication (`*`)
+    IMul,
+    /// Integer division (`/`)
+    IDiv,
+    /// Integer modulo (`%`)
+    IMod,
+    /// Float addition (`+.`)
+    FAdd,
+    /// Float subtraction (`-.`)
+    FSub,
+    /// Float multiplication (`*.`)
+    FMul,
+    /// Float division (`/.`)
+    FDiv,
+
+    /// Integer greater than (`>`)
+    IGt,
+    /// Integer less than (`<`)
+    ILt,
+    /// Integer greater than or equal to (`>=`)
+    IGe,
+    /// Integer less than or equal to (`<=`)
+    ILe,
+    /// Integer equal to (`=:=`)
+    IEq,
+    /// Integer not equal to (`=\=`)
+    INe,
+    /// Float greater than (`>.`)
+    FGt,
+    /// Float less than (`<.`)
+    FLt,
+    /// Float greater than or equal to (`>=.`)
+    FGe,
+    /// Float less than or equal to (`<=.`)
+    FLe,
+    /// Float equal to (`=:=.`)
+    FEq,
+    /// Float not equal to (`=\=.`)
+    FNe,
+
+    /// Ground equal to (`==`)
+    GroundEq,
+    /// Ground not equal to (`\=`)
+    GroundNe,
+    /// Unary equal to (`===`)
+    UnaryEq,
+    /// Unary not equal to (`\==`)
+    UnaryNe,
 
     // Brackets
     LeftParen,
@@ -71,6 +125,31 @@ impl Display for TokenKind {
             TokenKind::LeftBrace => write!(f, "{{"),
             TokenKind::RightBrace => write!(f, "}}"),
             TokenKind::EOF => write!(f, "<EOF>"),
+            TokenKind::IAdd => write!(f, "+"),
+            TokenKind::ISub => write!(f, "-"),
+            TokenKind::IMul => write!(f, "*"),
+            TokenKind::IDiv => write!(f, "/"),
+            TokenKind::IMod => write!(f, "%"),
+            TokenKind::FAdd => write!(f, "+."),
+            TokenKind::FSub => write!(f, "-."),
+            TokenKind::FMul => write!(f, "*."),
+            TokenKind::FDiv => write!(f, "/."),
+            TokenKind::IGt => write!(f, ">"),
+            TokenKind::ILt => write!(f, "<"),
+            TokenKind::IGe => write!(f, ">="),
+            TokenKind::ILe => write!(f, "<="),
+            TokenKind::IEq => write!(f, "=:=."),
+            TokenKind::INe => write!(f, "=\\=."),
+            TokenKind::FGt => write!(f, ">."),
+            TokenKind::FLt => write!(f, "<."),
+            TokenKind::FGe => write!(f, ">=."),
+            TokenKind::FLe => write!(f, "<=."),
+            TokenKind::FEq => write!(f, "=:=."),
+            TokenKind::FNe => write!(f, "=\\=."),
+            TokenKind::GroundEq => write!(f, "=="),
+            TokenKind::GroundNe => write!(f, "\\="),
+            TokenKind::UnaryEq => write!(f, "==="),
+            TokenKind::UnaryNe => write!(f, "\\=="),
         }
     }
 }
@@ -90,6 +169,13 @@ impl From<char> for TokenKind {
             '!' => TokenKind::Bang,
             '$' => TokenKind::Dollar,
             '=' => TokenKind::Equal,
+            '+' => TokenKind::IAdd,
+            '-' => TokenKind::ISub,
+            '*' => TokenKind::IMul,
+            '/' => TokenKind::IDiv,
+            '%' => TokenKind::IMod,
+            '>' => TokenKind::IGt,
+            '<' => TokenKind::ILt,
             '(' => TokenKind::LeftParen,
             ')' => TokenKind::RightParen,
             '[' => TokenKind::LeftBracket,

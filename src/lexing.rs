@@ -205,7 +205,7 @@ impl<'src> Lexer<'src> {
                 '0'..='9' => self.consume_number(),
                 'a'..='z' | 'A'..='Z' | '_' => self.consume_ident(),
                 '"' => self.consume_string(),
-                ',' | '.' | '|' | '!' | '$' | '=' | '(' | ')' | '[' | ']' | '{' | '}' => {
+                ',' | '.' | '|' | '!' | '$' | '(' | ')' | '[' | ']' | '{' | '}' => {
                     self.next();
                     Ok(Token::new(Span::new(start.into(), self.offset.into()), c))
                 }
@@ -243,9 +243,247 @@ impl<'src> Lexer<'src> {
                         }),
                     }
                 }
-                ' ' | '\t' | '\r' | '\n' => {
+                c if c.is_whitespace() => {
                     self.next();
                     continue;
+                }
+                '+' => {
+                    self.next();
+                    match self.peek() {
+                        Some('.') => {
+                            self.next();
+                            Ok(Token::new(
+                                Span::new(start.into(), self.offset.into()),
+                                TokenKind::FAdd,
+                            ))
+                        }
+                        _ => Ok(Token::new(
+                            Span::new(start.into(), self.offset.into()),
+                            TokenKind::IAdd,
+                        )),
+                    }
+                }
+                '-' => {
+                    self.next();
+                    match self.peek() {
+                        Some('.') => {
+                            self.next();
+                            Ok(Token::new(
+                                Span::new(start.into(), self.offset.into()),
+                                TokenKind::FSub,
+                            ))
+                        }
+                        _ => Ok(Token::new(
+                            Span::new(start.into(), self.offset.into()),
+                            TokenKind::ISub,
+                        )),
+                    }
+                }
+                '*' => {
+                    self.next();
+                    match self.peek() {
+                        Some('.') => {
+                            self.next();
+                            Ok(Token::new(
+                                Span::new(start.into(), self.offset.into()),
+                                TokenKind::FMul,
+                            ))
+                        }
+                        _ => Ok(Token::new(
+                            Span::new(start.into(), self.offset.into()),
+                            TokenKind::IMul,
+                        )),
+                    }
+                }
+                '/' => {
+                    self.next();
+                    match self.peek() {
+                        Some('.') => {
+                            self.next();
+                            Ok(Token::new(
+                                Span::new(start.into(), self.offset.into()),
+                                TokenKind::FDiv,
+                            ))
+                        }
+                        _ => Ok(Token::new(
+                            Span::new(start.into(), self.offset.into()),
+                            TokenKind::IDiv,
+                        )),
+                    }
+                }
+                '%' => {
+                    self.next();
+                    Ok(Token::new(
+                        Span::new(start.into(), self.offset.into()),
+                        TokenKind::IMod,
+                    ))
+                }
+                '>' => {
+                    self.next();
+                    match self.peek() {
+                        Some('.') => {
+                            self.next();
+                            Ok(Token::new(
+                                Span::new(start.into(), self.offset.into()),
+                                TokenKind::FGt,
+                            ))
+                        }
+                        Some('=') => {
+                            self.next();
+                            match self.peek() {
+                                Some('.') => {
+                                    self.next();
+                                    Ok(Token::new(
+                                        Span::new(start.into(), self.offset.into()),
+                                        TokenKind::FGe,
+                                    ))
+                                }
+                                _ => Ok(Token::new(
+                                    Span::new(start.into(), self.offset.into()),
+                                    TokenKind::IGe,
+                                )),
+                            }
+                        }
+                        _ => Ok(Token::new(
+                            Span::new(start.into(), self.offset.into()),
+                            TokenKind::IGt,
+                        )),
+                    }
+                }
+                '<' => {
+                    self.next();
+                    match self.peek() {
+                        Some('.') => {
+                            self.next();
+                            Ok(Token::new(
+                                Span::new(start.into(), self.offset.into()),
+                                TokenKind::FLt,
+                            ))
+                        }
+                        Some('=') => {
+                            self.next();
+                            match self.peek() {
+                                Some('.') => {
+                                    self.next();
+                                    Ok(Token::new(
+                                        Span::new(start.into(), self.offset.into()),
+                                        TokenKind::FLe,
+                                    ))
+                                }
+                                _ => Ok(Token::new(
+                                    Span::new(start.into(), self.offset.into()),
+                                    TokenKind::ILe,
+                                )),
+                            }
+                        }
+                        _ => Ok(Token::new(
+                            Span::new(start.into(), self.offset.into()),
+                            TokenKind::ILt,
+                        )),
+                    }
+                }
+                '=' => {
+                    self.next();
+                    match self.peek() {
+                        Some(':') => {
+                            self.next();
+                            match self.peek() {
+                                Some('=') => {
+                                    self.next();
+                                    match self.peek() {
+                                        Some('.') => {
+                                            self.next();
+                                            Ok(Token::new(
+                                                Span::new(start.into(), self.offset.into()),
+                                                TokenKind::FEq,
+                                            ))
+                                        }
+                                        _ => Ok(Token::new(
+                                            Span::new(start.into(), self.offset.into()),
+                                            TokenKind::IEq,
+                                        )),
+                                    }
+                                }
+                                _ => Err(LexError {
+                                    offset: self.offset,
+                                    ty: LexErrorType::Expected('='),
+                                    recoverable: Some((TokenKind::IEq, tokens.len())),
+                                }),
+                            }
+                        }
+                        Some('\\') => {
+                            self.next();
+                            match self.peek() {
+                                Some('=') => {
+                                    self.next();
+                                    match self.peek() {
+                                        Some('.') => {
+                                            self.next();
+                                            Ok(Token::new(
+                                                Span::new(start.into(), self.offset.into()),
+                                                TokenKind::FNe,
+                                            ))
+                                        }
+                                        _ => Ok(Token::new(
+                                            Span::new(start.into(), self.offset.into()),
+                                            TokenKind::INe,
+                                        )),
+                                    }
+                                }
+                                _ => Err(LexError {
+                                    offset: self.offset,
+                                    ty: LexErrorType::Expected('='),
+                                    recoverable: Some((TokenKind::INe, tokens.len())),
+                                }),
+                            }
+                        }
+                        Some('=') => {
+                            self.next();
+                            match self.peek() {
+                                Some('=') => {
+                                    self.next();
+                                    Ok(Token::new(
+                                        Span::new(start.into(), self.offset.into()),
+                                        TokenKind::UnaryEq,
+                                    ))
+                                }
+                                _ => Ok(Token::new(
+                                    Span::new(start.into(), self.offset.into()),
+                                    TokenKind::GroundEq,
+                                )),
+                            }
+                        }
+                        _ => Ok(Token::new(
+                            Span::new(start.into(), self.offset.into()),
+                            TokenKind::Equal,
+                        )),
+                    }
+                }
+                '\\' => {
+                    self.next();
+                    match self.peek() {
+                        Some('=') => {
+                            self.next();
+                            match self.peek() {
+                                Some('=') => {
+                                    self.next();
+                                    Ok(Token::new(
+                                        Span::new(start.into(), self.offset.into()),
+                                        TokenKind::UnaryNe,
+                                    ))
+                                }
+                                _ => Ok(Token::new(
+                                    Span::new(start.into(), self.offset.into()),
+                                    TokenKind::GroundNe,
+                                )),
+                            }
+                        }
+                        _ => Err(LexError {
+                            offset: self.offset,
+                            ty: LexErrorType::Expected('='),
+                            recoverable: Some((TokenKind::GroundNe, tokens.len())),
+                        }),
+                    }
                 }
                 _ => {
                     self.next();
@@ -330,4 +568,20 @@ fn test_lexing() {
     let result = lexer.lex();
     assert_eq!(result.errors.len(), 1);
     assert_eq!(result.tokens.len(), 21);
+}
+
+#[test]
+fn test_lexing_operator() {
+    let source = SourceCode::phony("a + b *. c =:= d".to_owned());
+    let mut lexer = Lexer::new(&source);
+    let result = lexer.lex();
+    assert_eq!(result.errors.len(), 0);
+    assert_eq!(result.tokens.len(), 7);
+    assert_eq!(result.tokens[0].kind, TokenKind::Identifier("a".to_owned()));
+    assert_eq!(result.tokens[1].kind, TokenKind::IAdd);
+    assert_eq!(result.tokens[2].kind, TokenKind::Identifier("b".to_owned()));
+    assert_eq!(result.tokens[3].kind, TokenKind::FMul);
+    assert_eq!(result.tokens[4].kind, TokenKind::Identifier("c".to_owned()));
+    assert_eq!(result.tokens[5].kind, TokenKind::IEq);
+    assert_eq!(result.tokens[6].kind, TokenKind::Identifier("d".to_owned()));
 }
