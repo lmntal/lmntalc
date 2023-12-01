@@ -19,6 +19,7 @@ pub enum LexErrorType {
     UnexpectedCharacter(char),
     UncompleteNumber,
     UncompleteString,
+    UnclosedQuote,
 }
 
 #[derive(Clone, Debug)]
@@ -48,9 +49,8 @@ impl<'src> Lexer<'src> {
     }
 
     fn next(&mut self) -> Option<char> {
-        let c = self.src.next()?;
         self.offset += 1;
-        Some(c)
+        self.src.next()
     }
 
     fn peek(&mut self) -> Option<char> {
@@ -69,18 +69,6 @@ impl<'src> Lexer<'src> {
             s.push(self.next().unwrap());
         }
         s
-    }
-
-    fn skip_while<F>(&mut self, mut f: F)
-    where
-        F: FnMut(char) -> bool,
-    {
-        while let Some(c) = self.peek() {
-            if !f(c) {
-                break;
-            }
-            self.next();
-        }
     }
 }
 
@@ -163,13 +151,41 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    fn consume_char(&mut self) -> LexResult {
+        self.next();
+        let start = self.offset;
+        match self.next() {
+            Some(c) => {
+                if self.next() != Some('\'') {
+                    return Err(LexError {
+                        offset: self.offset,
+                        ty: LexErrorType::UnclosedQuote,
+                        recoverable: None,
+                    });
+                }
+                let end = self.offset;
+                let span = Span::new(start.into(), end.into());
+                Ok(Token::new(span, TokenKind::Char(c)))
+            }
+            None => Err(LexError {
+                offset: self.offset,
+                ty: LexErrorType::UnclosedQuote,
+                recoverable: None,
+            }),
+        }
+    }
+
     fn consume_string(&mut self) -> LexResult {
         let start = self.offset;
         let mut s = String::new();
+        let mut terminated = false;
         self.next();
         while let Some(c) = self.next() {
             match c {
-                '"' => break,
+                '"' => {
+                    terminated = true;
+                    break;
+                }
                 '\\' => {
                     let c = self.next().unwrap();
                     match c {
@@ -182,6 +198,13 @@ impl<'src> Lexer<'src> {
                 }
                 _ => s.push(c),
             }
+        }
+        if !terminated {
+            return Err(LexError {
+                offset: self.offset,
+                ty: LexErrorType::UncompleteString,
+                recoverable: None,
+            });
         }
         let end = self.offset;
         let span = Span::new(start.into(), end.into());
@@ -205,6 +228,7 @@ impl<'src> Lexer<'src> {
                 '0'..='9' => self.consume_number(),
                 'a'..='z' | 'A'..='Z' | '_' => self.consume_ident(),
                 '"' => self.consume_string(),
+                '\'' => self.consume_char(),
                 ',' | '.' | '|' | '!' | '$' | '(' | ')' | '[' | ']' | '{' | '}' => {
                     self.next();
                     Ok(Token::new(Span::new(start.into(), self.offset.into()), c))
@@ -523,6 +547,9 @@ impl<'src> Lexer<'src> {
             LexErrorType::UncompleteString => {
                 eprintln!("{}:{}:{}: uncomplete string", self.source.name(), line, col);
             }
+            LexErrorType::UnclosedQuote => {
+                eprintln!("{}:{}:{}: unclosed quote", self.source.name(), line, col);
+            }
         }
     }
 }
@@ -572,12 +599,12 @@ fn test_lexing() {
 
 #[test]
 fn test_lexing_operator() {
-    let source = SourceCode::phony("a + b *. c =:= d".to_owned());
+    let source = SourceCode::phony("'a' + b *. c =:= d".to_owned());
     let mut lexer = Lexer::new(&source);
     let result = lexer.lex();
     assert_eq!(result.errors.len(), 0);
     assert_eq!(result.tokens.len(), 7);
-    assert_eq!(result.tokens[0].kind, TokenKind::Identifier("a".to_owned()));
+    assert_eq!(result.tokens[0].kind, TokenKind::Char('a'));
     assert_eq!(result.tokens[1].kind, TokenKind::IAdd);
     assert_eq!(result.tokens[2].kind, TokenKind::Identifier("b".to_owned()));
     assert_eq!(result.tokens[3].kind, TokenKind::FMul);
