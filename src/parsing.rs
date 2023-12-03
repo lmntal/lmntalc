@@ -1,7 +1,7 @@
 use std::{cell::Cell, fmt::Display};
 
 use crate::{
-    lexing::Lexer,
+    lexing::{LexError, Lexer},
     source_code::SourceCode,
     token::{Token, TokenKind},
 };
@@ -10,6 +10,7 @@ use crate::{
 pub struct Parser<'lex> {
     source: &'lex SourceCode,
     tokens: Vec<Token>,
+    lex_errors: Vec<LexError>,
     pos: Cell<usize>,
 }
 
@@ -30,7 +31,7 @@ pub enum ASTNode {
     },
     Atom {
         name: String,
-        children: Vec<ASTNode>,
+        args: Vec<ASTNode>,
     },
     Link {
         name: String,
@@ -62,13 +63,20 @@ impl Display for ParseError {
     }
 }
 
-pub type ParsingResult = Result<ASTNode, ParseError>;
+pub type ParseResult = Result<ASTNode, ParseError>;
+
+#[derive(Debug)]
+pub struct ParsingResult {
+    pub ast: ASTNode,
+    pub errors: Vec<ParseError>,
+}
 
 impl<'lex> Parser<'lex> {
     pub fn new(source: &'lex SourceCode) -> Parser<'lex> {
         Parser {
             source,
             tokens: Vec::new(),
+            lex_errors: Vec::new(),
             pos: Cell::new(0),
         }
     }
@@ -153,43 +161,57 @@ impl<'lex> Parser<'lex> {
         self.pos.set(self.pos.get() - n);
     }
 
+    /// Start parsing the source code
     pub fn parse(&mut self) -> ParsingResult {
         let mut lexer = Lexer::new(self.source);
         let result = lexer.lex();
         self.tokens = result.tokens;
+        self.lex_errors = result.errors;
 
         let mut processes = vec![];
         let mut rules = vec![];
 
-        while let Ok(res) = self.parse_rule_or_process_list() {
-            match res {
-                ASTNode::Rule { .. } => {
-                    rules.push(res);
-                }
-                ASTNode::ProcessList { .. } => {
-                    processes.push(res);
-                }
-                _ => unreachable!(),
+        let mut errors = vec![];
+
+        loop {
+            if self.eof() {
+                break;
             }
-            if self.skip(&TokenKind::Dot) {
-                continue;
-            } else {
+            let res = self.parse_rule_or_process_list();
+            match res {
+                Ok(ast) => match ast {
+                    ASTNode::Rule { .. } => {
+                        rules.push(ast);
+                    }
+                    ASTNode::ProcessList { .. } => {
+                        processes.push(ast);
+                    }
+                    _ => unreachable!(),
+                },
+                Err(err) => {
+                    errors.push(err);
+                }
+            }
+            if !self.skip(&TokenKind::Dot) {
                 break;
             }
         }
 
-        Ok(ASTNode::Membrane {
-            name: "_init".to_owned(),
-            rules,
-            processes,
-        })
+        ParsingResult {
+            ast: ASTNode::Membrane {
+                name: "_init".to_owned(),
+                processes,
+                rules,
+            },
+            errors,
+        }
     }
 }
 
 impl<'lex> Parser<'lex> {
-    fn parse_rule_or_process_list(&mut self) -> ParsingResult {
+    fn parse_rule_or_process_list(&mut self) -> ParseResult {
         let head = self.parse_process_list()?;
-        if self.expect(&TokenKind::ColonDash).is_err() {
+        if !self.skip(&TokenKind::ColonDash) {
             return Ok(head);
         }
         let guard_or_body = self.parse_process_list()?;
@@ -209,7 +231,7 @@ impl<'lex> Parser<'lex> {
         }
     }
 
-    fn parse_rule(&mut self) -> ParsingResult {
+    fn parse_rule(&mut self) -> ParseResult {
         let head = self.parse_process_list()?;
         self.expect(&TokenKind::ColonDash)?;
         let guard_or_body = self.parse_process_list()?;
@@ -229,7 +251,7 @@ impl<'lex> Parser<'lex> {
         }
     }
 
-    fn parse_process_list(&mut self) -> ParsingResult {
+    fn parse_process_list(&mut self) -> ParseResult {
         let mut processes = vec![];
         loop {
             processes.push(self.parse_process()?);
@@ -242,7 +264,7 @@ impl<'lex> Parser<'lex> {
         Ok(ASTNode::ProcessList { processes })
     }
 
-    fn parse_process(&mut self) -> ParsingResult {
+    fn parse_process(&mut self) -> ParseResult {
         if let Ok(res) = self.parse_atom() {
             Ok(res)
         } else if let Ok(res) = self.parse_membrane() {
@@ -271,7 +293,7 @@ impl<'lex> Parser<'lex> {
         }
     }
 
-    fn parse_membrane(&mut self) -> ParsingResult {
+    fn parse_membrane(&mut self) -> ParseResult {
         let token = self.peek();
         let mut m_name = String::new();
         match &token.kind {
@@ -325,42 +347,67 @@ impl<'lex> Parser<'lex> {
         })
     }
 
-    fn parse_atom(&mut self) -> ParsingResult {
+    fn parse_atom(&mut self) -> ParseResult {
         let token = self.peek();
-        match &token.kind {
+        let name = match &token.kind {
             TokenKind::Identifier(name) | TokenKind::Keyword(name) => {
                 // check if the name starts with a non_uppercase letter
                 if name.starts_with(|c: char| c.is_uppercase()) {
                     return Err(ParseError::Placeholder);
                 }
                 self.advance();
-                if !self.skip(&TokenKind::LeftParen) {
-                    Ok(ASTNode::Atom {
-                        name: name.clone(),
-                        children: Vec::new(),
-                    })
+                name.clone()
+            }
+            TokenKind::Char(c) => {
+                self.advance();
+                c.to_string()
+            }
+            TokenKind::Int(i) => {
+                self.advance();
+                i.to_string()
+            }
+            TokenKind::Float(f) => {
+                self.advance();
+                f.to_string()
+            }
+            _ => {
+                return Err(ParseError::UnexpectedToken {
+                    expected: TokenKind::Identifier("".to_owned()),
+                    found: token.clone(),
+                });
+            }
+        };
+        if !self.skip(&TokenKind::LeftParen) {
+            Ok(ASTNode::Atom {
+                name,
+                args: Vec::new(),
+            })
+        } else {
+            let mut children = vec![];
+
+            loop {
+                children.push(self.parse_process()?);
+                if self.skip(&TokenKind::Comma) {
+                    continue;
                 } else {
-                    let mut children = vec![];
-                    let name = name.clone();
-
-                    loop {
-                        children.push(self.parse_process()?);
-                        if self.skip(&TokenKind::Comma) {
-                            continue;
-                        } else {
-                            break;
-                        }
-                    }
-
-                    self.expect(&TokenKind::RightParen)?;
-                    Ok(ASTNode::Atom { name, children })
+                    break;
                 }
             }
-            _ => Err(ParseError::UnexpectedToken {
-                expected: TokenKind::Identifier("".to_owned()),
-                found: token.clone(),
-            }),
+
+            self.expect(&TokenKind::RightParen)?;
+            Ok(ASTNode::Atom {
+                name,
+                args: children,
+            })
         }
+    }
+}
+
+fn infix_binding_power(op: char) -> (u8, u8) {
+    match op {
+        '+' | '-' => (1, 2),
+        '*' | '/' | '%' => (3, 4),
+        _ => unreachable!(),
     }
 }
 
@@ -425,4 +472,12 @@ fn test_parse_rule_or_process_list() {
     parser.tokens = result.tokens;
     let result = parser.parse_rule_or_process_list();
     assert!(result.is_ok());
+}
+
+#[test]
+fn test_parse_world() {
+    let source = SourceCode::phony("a(X,b,Y),c(X,Y). a,b,c :- 10.".to_owned());
+    let mut parser = Parser::new(&source);
+    let result = parser.parse();
+    assert!(result.errors.is_empty());
 }

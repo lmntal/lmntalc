@@ -1,5 +1,6 @@
 use std::{
     cmp,
+    fmt::Display,
     ops::{Add, Deref, Sub},
 };
 
@@ -7,6 +8,12 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd, Debug, Serialize, Deserialize)]
 pub struct Pos(usize);
+
+impl Display for Pos {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 impl<T> From<T> for Pos
 where

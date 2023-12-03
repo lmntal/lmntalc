@@ -126,10 +126,16 @@ impl<'src> Lexer<'src> {
                 }
                 if self.peek() == Some('.') {
                     self.next();
-                    let s = format!("{}.{}", s, self.take_while(|c| c.is_ascii_digit()));
+                    let frac = self.take_while(|c| c.is_ascii_digit());
                     let end = self.offset;
                     let span = Span::new(start.into(), end.into());
-                    Ok(Token::new(span, s.parse::<f64>().unwrap()))
+                    if frac.is_empty() {
+                        // treat as integer and remain the dot
+                        Ok(Token::new(span, s.parse::<i64>().unwrap()))
+                    } else {
+                        let s = format!("{}.{}", s, frac);
+                        Ok(Token::new(span, s.parse::<f64>().unwrap()))
+                    }
                 } else {
                     let end = self.offset;
                     let span = Span::new(start.into(), end.into());
@@ -222,6 +228,7 @@ impl<'src> Lexer<'src> {
     pub fn lex(&mut self) -> LexingResult {
         let mut tokens = Vec::new();
         let mut errors = Vec::new();
+        let mut bracket_stack = Vec::new();
         while let Some(c) = self.peek() {
             let start = self.offset;
             let kind = match c {
@@ -229,9 +236,60 @@ impl<'src> Lexer<'src> {
                 'a'..='z' | 'A'..='Z' | '_' => self.consume_ident(),
                 '"' => self.consume_string(),
                 '\'' => self.consume_char(),
-                ',' | '.' | '|' | '!' | '$' | '(' | ')' | '[' | ']' | '{' | '}' => {
+                ',' | '.' | '|' | '!' | '$' => {
                     self.next();
                     Ok(Token::new(Span::new(start.into(), self.offset.into()), c))
+                }
+                '(' => {
+                    self.next();
+                    bracket_stack.push((start, '('));
+                    Ok(Token::new(Span::new(start.into(), self.offset.into()), '('))
+                }
+                '[' => {
+                    self.next();
+                    bracket_stack.push((start, '['));
+                    Ok(Token::new(Span::new(start.into(), self.offset.into()), '['))
+                }
+                '{' => {
+                    self.next();
+                    bracket_stack.push((start, '{'));
+                    Ok(Token::new(Span::new(start.into(), self.offset.into()), '{'))
+                }
+                ')' => {
+                    self.next();
+                    match bracket_stack.pop() {
+                        Some((_, '(')) => {
+                            Ok(Token::new(Span::new(start.into(), self.offset.into()), ')'))
+                        }
+                        _ => {
+                            let (line, col) = self.source.line_col(start);
+                            panic!("Unbalanced parentheses at {}:{}", line, col)
+                        }
+                    }
+                }
+                ']' => {
+                    self.next();
+                    match bracket_stack.pop() {
+                        Some((_, '[')) => {
+                            Ok(Token::new(Span::new(start.into(), self.offset.into()), ']'))
+                        }
+                        _ => {
+                            let (line, col) = self.source.line_col(start);
+                            panic!("Unbalanced brackets at {}:{}", line, col)
+                        }
+                    }
+                }
+                '}' => {
+                    self.next();
+                    match bracket_stack.pop() {
+                        Some((_, '{')) => {
+                            Ok(Token::new(Span::new(start.into(), self.offset.into()), '}'))
+                        }
+                        _ => {
+                            let (line, col) = self.source.line_col(start);
+                            panic!("Unbalanced braces at {}:{}", line, col);
+                        }
+                    }
                 }
                 '@' => {
                     self.next();
