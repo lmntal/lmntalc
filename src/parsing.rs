@@ -35,6 +35,10 @@ pub enum ASTNode {
     },
     Link {
         name: String,
+        hyperlink: bool,
+    },
+    Context {
+        name: String,
     },
 }
 
@@ -42,6 +46,8 @@ pub enum ASTNode {
 pub enum ParseError {
     UnexpectedToken { expected: TokenKind, found: Token },
     UnexpectedEOF,
+    /// Wrong case for an identifier, may be treated as a warning
+    WrongCase,
     Placeholder,
 }
 
@@ -57,7 +63,10 @@ impl Display for ParseError {
             }
             ParseError::UnexpectedEOF => {
                 write!(f, "Unexpected EOF")
-            }
+            },
+            ParseError::WrongCase => {
+                write!(f, "Wrong case")
+            },
             ParseError::Placeholder => todo!(),
         }
     }
@@ -269,27 +278,15 @@ impl<'lex> Parser<'lex> {
             Ok(res)
         } else if let Ok(res) = self.parse_membrane() {
             Ok(res)
+        } else if let Ok(res) = self.parse_link() {
+            Ok(res)
+        } else if let Ok(res) = self.parse_context() {
+            Ok(res)
         } else {
-            let token = self.peek();
-            // parse link
-            if let TokenKind::Identifier(ref ident) = token.kind {
-                if ident.starts_with(|c: char| c.is_uppercase()) {
-                    self.advance();
-                    return Ok(ASTNode::Link {
-                        name: ident.clone(),
-                    });
-                } else {
-                    Err(ParseError::UnexpectedToken {
-                        expected: TokenKind::Identifier("".to_owned()),
-                        found: token.clone(),
-                    })
-                }
-            } else {
-                Err(ParseError::UnexpectedToken {
-                    expected: TokenKind::Identifier("".to_owned()),
-                    found: token.clone(),
-                })
-            }
+            Err(ParseError::UnexpectedToken {
+                expected: TokenKind::Identifier("".to_owned()),
+                found: self.peek().clone(),
+            })
         }
     }
 
@@ -401,6 +398,65 @@ impl<'lex> Parser<'lex> {
             })
         }
     }
+
+    fn parse_link(&mut self) -> ParseResult {
+        let hyperlink = if self.peek().kind == TokenKind::Bang {
+            self.advance();
+            true
+        } else {
+            false
+        };
+        let token = self.peek();
+        // parse link
+        if let TokenKind::Identifier(ref ident) = token.kind {
+            if ident.starts_with(|c: char| c.is_uppercase()) {
+                self.advance();
+                return Ok(ASTNode::Link {
+                    name: ident.clone(),
+                    hyperlink,
+                });
+            } else {
+                Err(ParseError::UnexpectedToken {
+                    expected: TokenKind::Identifier("".to_owned()),
+                    found: token.clone(),
+                })
+            }
+        } else {
+            Err(ParseError::UnexpectedToken {
+                expected: TokenKind::Identifier("".to_owned()),
+                found: token.clone(),
+            })
+        }
+    }
+
+    /// Parse a context: $Context
+    fn parse_context(&mut self) -> ParseResult {
+        let token = self.peek();
+        if let TokenKind::Dollar = token.kind {
+            self.advance();
+            let token = self.peek();
+            if let TokenKind::Identifier(ref ident) = token.kind {
+                if ident.starts_with(|c: char| c.is_lowercase()) {
+                    self.advance();
+                    return Ok(ASTNode::Context {
+                        name: ident.clone(),
+                    });
+                } else {
+                    Err(ParseError::WrongCase)
+                }
+            } else {
+                Err(ParseError::UnexpectedToken {
+                    expected: TokenKind::Identifier("".to_owned()),
+                    found: token.clone(),
+                })
+            }
+        } else {
+            Err(ParseError::UnexpectedToken {
+                expected: TokenKind::Dollar,
+                found: token.clone(),
+            })
+        }
+    }
 }
 
 fn infix_binding_power(op: char) -> (u8, u8) {
@@ -424,7 +480,7 @@ fn test_parse_atom() {
 
 #[test]
 fn test_parse_membrane() {
-    let source = SourceCode::phony("{a(X,b,Y),c(X,Y). a,b,c :- e}".to_owned());
+    let source = SourceCode::phony("{a(X,b,!Y),c(X,Y). a,b,c :- e}".to_owned());
     let mut parser = Parser::new(&source);
     let mut lexer = Lexer::new(&source);
     let result = lexer.lex();
