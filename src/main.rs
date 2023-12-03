@@ -1,7 +1,11 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use lmntalc::{parsing, source_code::SourceCode};
+use lmntalc::{
+    ast::tree,
+    parsing::{self},
+    source_code::SourceCode,
+};
 
 #[derive(Parser)]
 #[command(name = "LMNtal Compiler")]
@@ -9,6 +13,9 @@ use lmntalc::{parsing, source_code::SourceCode};
 struct Cli {
     #[arg(value_name = "FILE")]
     source: PathBuf,
+
+    #[arg(long, value_name = "dump ast", default_value = "false")]
+    dump_ast: bool,
 }
 
 fn main() {
@@ -25,5 +32,12 @@ fn main() {
     let code = SourceCode::new(&cli.source);
     let mut parser = parsing::Parser::new(&code);
     let res = parser.parse();
-    println!("{:#?}", res);
+
+    if cli.dump_ast {
+        let t = tree(&res.ast);
+        match t {
+            Ok(t) => println!("{}", t),
+            Err(e) => println!("{}", e),
+        }
+    }
 }

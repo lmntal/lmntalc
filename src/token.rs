@@ -246,6 +246,10 @@ impl Token {
             kind: TokenKind::EOF,
         }
     }
+
+    pub fn pretty_print(&self) -> String {
+        format!("{}", self.kind)
+    }
 }
 
 impl<T> From<T> for Token

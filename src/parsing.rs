@@ -1,6 +1,7 @@
 use std::{cell::Cell, fmt::Display};
 
 use crate::{
+    ast::ASTNode,
     lexing::{LexError, Lexer},
     source_code::SourceCode,
     token::{Token, TokenKind},
@@ -15,36 +16,11 @@ pub struct Parser<'lex> {
 }
 
 #[derive(Debug)]
-pub enum ASTNode {
-    Rule {
-        head: Box<ASTNode>,
-        guard: Option<Box<ASTNode>>,
-        body: Box<ASTNode>,
-    },
-    ProcessList {
-        processes: Vec<ASTNode>,
-    },
-    Membrane {
-        name: String,
-        processes: Vec<ASTNode>,
-        rules: Vec<ASTNode>,
-    },
-    Atom {
-        name: String,
-        args: Vec<ASTNode>,
-    },
-    Link {
-        name: String,
-        hyperlink: bool,
-    },
-    Context {
-        name: String,
-    },
-}
-
-#[derive(Debug)]
 pub enum ParseError {
-    UnexpectedToken { expected: TokenKind, found: Token },
+    UnexpectedToken {
+        expected: TokenKind,
+        found: Token,
+    },
     UnexpectedEOF,
     /// Wrong case for an identifier, may be treated as a warning
     WrongCase,
@@ -63,10 +39,10 @@ impl Display for ParseError {
             }
             ParseError::UnexpectedEOF => {
                 write!(f, "Unexpected EOF")
-            },
+            }
             ParseError::WrongCase => {
                 write!(f, "Wrong case")
-            },
+            }
             ParseError::Placeholder => todo!(),
         }
     }
@@ -219,20 +195,34 @@ impl<'lex> Parser<'lex> {
 
 impl<'lex> Parser<'lex> {
     fn parse_rule_or_process_list(&mut self) -> ParseResult {
+        if self.look_ahead(0).kind == TokenKind::Identifier("".to_owned())
+            && self.look_ahead(1).kind == TokenKind::AtAt
+        {
+            return self.parse_named_rule();
+        }
+        let start = self.pos.get();
         let head = self.parse_process_list()?;
         if !self.skip(&TokenKind::ColonDash) {
             return Ok(head);
         }
+        let end = self.pos.get();
+        let name = self.tokens[start..end - 1]
+            .iter()
+            .map(|t| t.pretty_print())
+            .collect::<Vec<String>>()
+            .join("");
         let guard_or_body = self.parse_process_list()?;
         if self.skip(&TokenKind::Vert) {
             let body = self.parse_process_list()?;
             Ok(ASTNode::Rule {
+                name,
                 head: Box::new(head),
                 guard: Some(Box::new(guard_or_body)),
                 body: Box::new(body),
             })
         } else {
             Ok(ASTNode::Rule {
+                name,
                 head: Box::new(head),
                 guard: None,
                 body: Box::new(guard_or_body),
@@ -240,19 +230,23 @@ impl<'lex> Parser<'lex> {
         }
     }
 
-    fn parse_rule(&mut self) -> ParseResult {
+    fn parse_named_rule(&mut self) -> ParseResult {
+        let name = self.next().pretty_print();
+        self.expect(&TokenKind::AtAt)?;
         let head = self.parse_process_list()?;
         self.expect(&TokenKind::ColonDash)?;
         let guard_or_body = self.parse_process_list()?;
         if self.skip(&TokenKind::Vert) {
             let body = self.parse_process_list()?;
             Ok(ASTNode::Rule {
+                name,
                 head: Box::new(head),
                 guard: Some(Box::new(guard_or_body)),
                 body: Box::new(body),
             })
         } else {
             Ok(ASTNode::Rule {
+                name,
                 head: Box::new(head),
                 guard: None,
                 body: Box::new(guard_or_body),
@@ -411,10 +405,10 @@ impl<'lex> Parser<'lex> {
         if let TokenKind::Identifier(ref ident) = token.kind {
             if ident.starts_with(|c: char| c.is_uppercase()) {
                 self.advance();
-                return Ok(ASTNode::Link {
+                Ok(ASTNode::Link {
                     name: ident.clone(),
                     hyperlink,
-                });
+                })
             } else {
                 Err(ParseError::UnexpectedToken {
                     expected: TokenKind::Identifier("".to_owned()),
@@ -438,9 +432,9 @@ impl<'lex> Parser<'lex> {
             if let TokenKind::Identifier(ref ident) = token.kind {
                 if ident.starts_with(|c: char| c.is_lowercase()) {
                     self.advance();
-                    return Ok(ASTNode::Context {
+                    Ok(ASTNode::Context {
                         name: ident.clone(),
-                    });
+                    })
                 } else {
                     Err(ParseError::WrongCase)
                 }
@@ -496,7 +490,7 @@ fn test_parse_rule() {
     let mut lexer = Lexer::new(&source);
     let result = lexer.lex();
     parser.tokens = result.tokens;
-    let result = parser.parse_rule();
+    let result = parser.parse_named_rule();
     assert!(result.is_ok());
 }
 
