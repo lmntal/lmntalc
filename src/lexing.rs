@@ -37,6 +37,33 @@ impl LexError {
             None => false,
         }
     }
+
+    pub fn to_string(&self, source: &SourceCode) -> String {
+        let (line, col) = source.line_col(self.offset);
+        match &self.ty {
+            LexErrorType::Expected(c) => {
+                format!("{}:{}:{}: expected '{}'", source.name(), line, col, c)
+            }
+            LexErrorType::UnexpectedCharacter(c) => {
+                format!(
+                    "{}:{}:{}: unexpected character '{}'",
+                    source.name(),
+                    line,
+                    col,
+                    c
+                )
+            }
+            LexErrorType::UncompleteNumber => {
+                format!("{}:{}:{}: uncomplete number", source.name(), line, col)
+            }
+            LexErrorType::UncompleteString => {
+                format!("{}:{}:{}: uncomplete string", source.name(), line, col)
+            }
+            LexErrorType::UnclosedQuote => {
+                format!("{}:{}:{}: unclosed quote", source.name(), line, col)
+            }
+        }
+    }
 }
 
 // Basic lexer functions

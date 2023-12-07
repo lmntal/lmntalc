@@ -12,7 +12,6 @@ use crate::{
 pub struct Parser<'lex> {
     source: &'lex SourceCode,
     tokens: Vec<Token>,
-    lex_errors: Vec<LexError>,
     pos: Cell<usize>,
 }
 
@@ -20,11 +19,34 @@ pub struct Parser<'lex> {
 pub enum ParseError {
     UnexpectedToken {
         expected: TokenKind,
-        found: Token,
+        found: TokenKind,
     },
     UnexpectedEOF,
     /// Wrong case for an identifier, may be treated as a warning
-    WrongCase,
+    WrongCase(IdentifierKind),
+}
+
+#[derive(Debug)]
+pub enum IdentifierKind {
+    Atom,
+    Membrane,
+    Rule,
+    Process,
+    Link,
+    Context,
+}
+
+impl Display for IdentifierKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IdentifierKind::Atom => write!(f, "atom"),
+            IdentifierKind::Membrane => write!(f, "membrane"),
+            IdentifierKind::Rule => write!(f, "rule"),
+            IdentifierKind::Process => write!(f, "process"),
+            IdentifierKind::Link => write!(f, "link"),
+            IdentifierKind::Context => write!(f, "context"),
+        }
+    }
 }
 
 impl Display for ParseError {
@@ -40,8 +62,8 @@ impl Display for ParseError {
             ParseError::UnexpectedEOF => {
                 write!(f, "Unexpected EOF")
             }
-            ParseError::WrongCase => {
-                write!(f, "Wrong case")
+            ParseError::WrongCase(id) => {
+                write!(f, "Wrong case for {}", id)
             }
         }
     }
@@ -53,7 +75,8 @@ type ParseResult = Result<ASTNode, ParseError>;
 #[derive(Debug)]
 pub struct ParsingResult {
     pub ast: ASTNode,
-    pub errors: Vec<ParseError>,
+    pub lexing_errors: Vec<LexError>,
+    pub parsing_errors: Vec<ParseError>,
 }
 
 impl<'lex> Parser<'lex> {
@@ -61,7 +84,6 @@ impl<'lex> Parser<'lex> {
         Parser {
             source,
             tokens: Vec::new(),
-            lex_errors: Vec::new(),
             pos: Cell::new(0),
         }
     }
@@ -104,7 +126,7 @@ impl<'lex> Parser<'lex> {
         } else {
             Err(ParseError::UnexpectedToken {
                 expected: kind.clone(),
-                found: self.peek().clone(),
+                found: self.peek().kind.clone(),
             })
         }
     }
@@ -157,7 +179,6 @@ impl<'lex> Parser<'lex> {
         let mut lexer = Lexer::new(self.source);
         let result = lexer.lex();
         self.tokens = result.tokens;
-        self.lex_errors = result.errors;
 
         let mut processes = vec![];
         let mut rules = vec![];
@@ -194,7 +215,8 @@ impl<'lex> Parser<'lex> {
                 processes,
                 rules,
             },
-            errors,
+            lexing_errors: result.errors,
+            parsing_errors: errors,
         }
     }
 }
@@ -311,7 +333,7 @@ impl<'lex> Parser<'lex> {
         } else {
             Err(ParseError::UnexpectedToken {
                 expected: TokenKind::Identifier("".to_owned()),
-                found: self.peek().clone(),
+                found: self.peek().kind.clone(),
             })
         }
     }
@@ -325,7 +347,7 @@ impl<'lex> Parser<'lex> {
             TokenKind::Identifier(name) => {
                 // check if the name starts with a non_uppercase letter
                 if name.starts_with(|c: char| c.is_uppercase()) {
-                    return Err(ParseError::WrongCase);
+                    return Err(ParseError::WrongCase(IdentifierKind::Membrane));
                 }
                 self.advance();
                 m_name = name.clone();
@@ -338,7 +360,7 @@ impl<'lex> Parser<'lex> {
             _ => {
                 return Err(ParseError::UnexpectedToken {
                     expected: TokenKind::Identifier("".to_owned()),
-                    found: token.clone(),
+                    found: token.kind.clone(),
                 })
             }
         }
@@ -378,7 +400,7 @@ impl<'lex> Parser<'lex> {
             TokenKind::Identifier(name) | TokenKind::Keyword(name) => {
                 // check if the name starts with a non_uppercase letter
                 if name.starts_with(|c: char| c.is_uppercase()) {
-                    return Err(ParseError::WrongCase);
+                    return Err(ParseError::WrongCase(IdentifierKind::Atom));
                 }
                 self.advance();
                 name.clone()
@@ -398,7 +420,7 @@ impl<'lex> Parser<'lex> {
             _ => {
                 return Err(ParseError::UnexpectedToken {
                     expected: TokenKind::Identifier("".to_owned()),
-                    found: token.clone(),
+                    found: token.kind.clone(),
                 });
             }
         };
@@ -447,13 +469,13 @@ impl<'lex> Parser<'lex> {
             } else {
                 Err(ParseError::UnexpectedToken {
                     expected: TokenKind::Identifier("".to_owned()),
-                    found: token.clone(),
+                    found: token.kind.clone(),
                 })
             }
         } else {
             Err(ParseError::UnexpectedToken {
                 expected: TokenKind::Identifier("".to_owned()),
-                found: token.clone(),
+                found: token.kind.clone(),
             })
         }
     }
@@ -471,18 +493,18 @@ impl<'lex> Parser<'lex> {
                         name: ident.clone(),
                     })
                 } else {
-                    Err(ParseError::WrongCase)
+                    Err(ParseError::WrongCase(IdentifierKind::Context))
                 }
             } else {
                 Err(ParseError::UnexpectedToken {
                     expected: TokenKind::Identifier("".to_owned()),
-                    found: token.clone(),
+                    found: token.kind.clone(),
                 })
             }
         } else {
             Err(ParseError::UnexpectedToken {
                 expected: TokenKind::Dollar,
-                found: token.clone(),
+                found: token.kind.clone(),
             })
         }
     }
@@ -534,7 +556,7 @@ fn test_compicate_process() {
     let source = SourceCode::phony("a({X,b,Y + b} * c(e)) :- a({X + b :- k. a + c}).".to_owned());
     let mut parser = Parser::new(&source);
     let result = parser.parse();
-    assert!(result.errors.is_empty());
+    assert!(result.parsing_errors.is_empty());
 }
 
 #[test]
@@ -570,5 +592,5 @@ fn test_parse_world() {
     let source = SourceCode::phony("a(X,b,Y),c(X,Y). a,b,c :- 10.".to_owned());
     let mut parser = Parser::new(&source);
     let result = parser.parse();
-    assert!(result.errors.is_empty());
+    assert!(result.parsing_errors.is_empty());
 }

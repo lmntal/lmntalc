@@ -33,6 +33,14 @@ fn main() {
     let mut parser = parsing::Parser::new(&code);
     let res = parser.parse();
 
+    for e in res.lexing_errors.iter() {
+        println!("{}", e.to_string(&code));
+    }
+
+    for e in res.parsing_errors.iter() {
+        println!("{}", e);
+    }
+
     if cli.dump_ast {
         let t = tree(&res.ast);
         match t {
