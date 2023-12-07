@@ -6,6 +6,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+/// A position in a CodeMap.
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd, Debug, Serialize, Deserialize)]
 pub struct Pos(usize);
 
@@ -101,6 +102,7 @@ impl Span {
         }
     }
 
+    /// Create a dummy span that points to the beginning of the file.
     pub const fn dummy() -> Self {
         Self {
             low: Pos(0),

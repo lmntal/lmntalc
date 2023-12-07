@@ -7,6 +7,7 @@ use crate::{
     token::{Token, TokenKind},
 };
 
+/// A parser for LMNtal source code
 #[derive(Debug)]
 pub struct Parser<'lex> {
     source: &'lex SourceCode,
@@ -48,8 +49,9 @@ impl Display for ParseError {
     }
 }
 
-pub type ParseResult = Result<ASTNode, ParseError>;
+type ParseResult = Result<ASTNode, ParseError>;
 
+/// The result of parsing, containing the AST and the errors for reporting or recovery
 #[derive(Debug)]
 pub struct ParsingResult {
     pub ast: ASTNode,
@@ -109,10 +111,12 @@ impl<'lex> Parser<'lex> {
         }
     }
 
+    /// Returns true if the parser has reached the end of the file
     fn eof(&self) -> bool {
         self.pos.get() >= self.tokens.len()
     }
 
+    /// Returns true if the next token matches the given kind
     fn is_match(&self, kind: &TokenKind) -> bool {
         self.peek().kind == *kind
     }
@@ -130,23 +134,27 @@ impl<'lex> Parser<'lex> {
         }
     }
 
+    /// Advance the position by one
     fn advance(&self) {
         self.pos.set(self.pos.get() + 1);
     }
 
+    /// Advance the position by n
     fn advance_n(&self, n: usize) {
         self.pos.set(self.pos.get() + n);
     }
 
+    /// Rewind the position by one
     fn rewind(&self) {
         self.pos.set(self.pos.get() - 1);
     }
 
+    /// Rewind the position by n
     fn rewind_n(&self, n: usize) {
         self.pos.set(self.pos.get() - n);
     }
 
-    /// Start parsing the source code
+    /// Start parsing the source code, the lexing is done in the process
     pub fn parse(&mut self) -> ParsingResult {
         let mut lexer = Lexer::new(self.source);
         let result = lexer.lex();
@@ -194,6 +202,10 @@ impl<'lex> Parser<'lex> {
 }
 
 impl<'lex> Parser<'lex> {
+    /// Parse a rule or a process list
+    ///
+    /// Since a rule and a process list both start with an process list, it will be convenient to
+    /// distinguish them by checking if the next token is a colon dash
     fn parse_rule_or_process_list(&mut self) -> ParseResult {
         let mut name = String::new();
         if self.look_ahead(0).kind == TokenKind::Identifier("".to_owned())
@@ -234,6 +246,7 @@ impl<'lex> Parser<'lex> {
         }
     }
 
+    /// Parse a process list
     fn parse_process_list(&mut self) -> ParseResult {
         let mut processes = vec![];
         loop {
@@ -247,6 +260,7 @@ impl<'lex> Parser<'lex> {
         Ok(ASTNode::ProcessList { processes })
     }
 
+    /// Parse an expression, using Pratt's algorithm
     fn parse_expr(&mut self, min_bp: u8) -> ParseResult {
         let op = self.peek().kind.clone();
         let mut lhs = match op {
@@ -286,6 +300,7 @@ impl<'lex> Parser<'lex> {
         Ok(lhs)
     }
 
+    /// Parse a process: a(X,b,Y),c(X,Y)
     fn parse_process(&mut self) -> ParseResult {
         if let Ok(res) = self.parse_atom() {
             Ok(res)
@@ -303,6 +318,7 @@ impl<'lex> Parser<'lex> {
         }
     }
 
+    /// Parse a membrane: {a(X,b,Y),c(X,Y). a,b,c :- e}
     fn parse_membrane(&mut self) -> ParseResult {
         let token = self.peek();
         let mut m_name = String::new();
@@ -357,6 +373,7 @@ impl<'lex> Parser<'lex> {
         })
     }
 
+    /// Parse an atom: a(X,b,Y)
     fn parse_atom(&mut self) -> ParseResult {
         let token = self.peek();
         let name = match &token.kind {
@@ -387,6 +404,7 @@ impl<'lex> Parser<'lex> {
                 });
             }
         };
+
         if !self.skip(&TokenKind::LeftParen) {
             Ok(ASTNode::Atom {
                 name,
@@ -472,6 +490,7 @@ impl<'lex> Parser<'lex> {
     }
 }
 
+/// Returns the binding power of the prefix operator
 fn prefix_binding_power(op: &TokenKind) -> u8 {
     match op {
         TokenKind::ISub | TokenKind::IAdd => 9,
@@ -479,6 +498,7 @@ fn prefix_binding_power(op: &TokenKind) -> u8 {
     }
 }
 
+/// Returns the binding power of the infix operator
 fn infix_binding_power(op: &TokenKind) -> (u8, u8) {
     match op {
         TokenKind::IAdd | TokenKind::ISub | TokenKind::FAdd | TokenKind::FSub => (3, 4),
@@ -490,17 +510,7 @@ fn infix_binding_power(op: &TokenKind) -> (u8, u8) {
     }
 }
 
-#[test]
-fn test_parse_atom() {
-    let source = SourceCode::phony("a(X,b,Y)".to_owned());
-    let mut parser = Parser::new(&source);
-    let mut lexer = Lexer::new(&source);
-    let result = lexer.lex();
-    parser.tokens = result.tokens;
-    let result = parser.parse_atom();
-    assert!(result.is_ok());
-}
-
+/// Initialize the parser with a phony source code and parse the given function, used for testing
 fn common_init(source: &str, func: fn(&mut Parser) -> ParseResult) -> ParseResult {
     let source = SourceCode::phony(source.to_owned());
     let mut parser = Parser::new(&source);
@@ -508,6 +518,11 @@ fn common_init(source: &str, func: fn(&mut Parser) -> ParseResult) -> ParseResul
     let result = lexer.lex();
     parser.tokens = result.tokens;
     func(&mut parser)
+}
+
+#[test]
+fn test_parse_atom() {
+    assert!(common_init("a(X,b,Y)", |p| p.parse_atom()).is_ok());
 }
 
 #[test]
@@ -543,21 +558,13 @@ fn test_parse_process_list() {
 
 #[test]
 fn test_parse_rule_or_process_list() {
-    let source = SourceCode::phony("a(X,b,Y),c(X,Y)".to_owned());
-    let mut parser = Parser::new(&source);
-    let mut lexer = Lexer::new(&source);
-    let result = lexer.lex();
-    parser.tokens = result.tokens;
-    let result = parser.parse_rule_or_process_list();
-    assert!(result.is_ok());
-
-    let source = SourceCode::phony("a(X,b,Y) :- int(A) | c(X,Y)".to_owned());
-    let mut parser = Parser::new(&source);
-    let mut lexer = Lexer::new(&source);
-    let result = lexer.lex();
-    parser.tokens = result.tokens;
-    let result = parser.parse_rule_or_process_list();
-    assert!(result.is_ok());
+    assert!(common_init("a(X,b,Y),c(X,Y)", |p| p.parse_rule_or_process_list()).is_ok());
+    assert!(common_init("name @@ a(X,b,Y) :- int(A) | c(X,Y)", |p| p
+        .parse_rule_or_process_list())
+    .is_ok());
+    assert!(common_init("a(X,b,Y) :- int(A) | c(X,Y)", |p| p
+        .parse_rule_or_process_list())
+    .is_ok());
 }
 
 #[test]

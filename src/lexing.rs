@@ -6,6 +6,7 @@ use crate::{
     util::Span,
 };
 
+/// A lexer for LMNtal.
 #[derive(Debug, Clone)]
 pub struct Lexer<'src> {
     source: &'src SourceCode,

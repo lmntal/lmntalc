@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+/// A source code file, with line and column information
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SourceCode {
     /// The name of the file
@@ -40,6 +41,7 @@ impl SourceCode {
         }
     }
 
+    /// Create a new SourceCode from a string
     pub fn phony(source: String) -> SourceCode {
         let lines = source
             .lines()
@@ -69,6 +71,7 @@ impl SourceCode {
         &self.path
     }
 
+    /// Get the line number at a given offset
     pub fn line_at_offset(&self, offset: usize) -> usize {
         match self.lines.binary_search(&offset) {
             Ok(line) => line + 1,
@@ -76,6 +79,7 @@ impl SourceCode {
         }
     }
 
+    /// Get the line and column number at a given offset
     pub fn line_col(&self, offset: usize) -> (usize, usize) {
         let line = self.line_at_offset(offset);
         let col = offset - self.lines[line - 1] + 1;

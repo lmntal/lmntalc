@@ -2,6 +2,7 @@ use std::io;
 
 use termtree::Tree;
 
+/// An AST node.
 #[derive(Debug)]
 pub enum ASTNode {
     Rule {
@@ -31,6 +32,7 @@ pub enum ASTNode {
     },
 }
 
+/// Convert an AST node to a tree for pretty printing.
 pub fn tree(p: &ASTNode) -> io::Result<Tree<String>> {
     let mut root = Tree::new(p.name());
     match p {

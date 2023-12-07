@@ -224,6 +224,7 @@ impl PartialEq for TokenKind {
 }
 
 impl TokenKind {
+    /// Is this token an operator?
     pub fn is_operator(&self) -> bool {
         matches!(
             self,
