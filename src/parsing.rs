@@ -195,10 +195,12 @@ impl<'lex> Parser<'lex> {
 
 impl<'lex> Parser<'lex> {
     fn parse_rule_or_process_list(&mut self) -> ParseResult {
+        let mut name = String::new();
         if self.look_ahead(0).kind == TokenKind::Identifier("".to_owned())
             && self.look_ahead(1).kind == TokenKind::AtAt
         {
-            return self.parse_named_rule();
+            name = self.peek().pretty_print();
+            self.advance_n(2);
         }
         let start = self.pos.get();
         let head = self.parse_process_list()?;
@@ -206,35 +208,13 @@ impl<'lex> Parser<'lex> {
             return Ok(head);
         }
         let end = self.pos.get();
-        let name = self.tokens[start..end - 1]
-            .iter()
-            .map(|t| t.pretty_print())
-            .collect::<Vec<String>>()
-            .join("");
-        let guard_or_body = self.parse_process_list()?;
-        if self.skip(&TokenKind::Vert) {
-            let body = self.parse_process_list()?;
-            Ok(ASTNode::Rule {
-                name,
-                head: Box::new(head),
-                guard: Some(Box::new(guard_or_body)),
-                body: Box::new(body),
-            })
-        } else {
-            Ok(ASTNode::Rule {
-                name,
-                head: Box::new(head),
-                guard: None,
-                body: Box::new(guard_or_body),
-            })
+        if name.is_empty() {
+            name = self.tokens[start..end - 1]
+                .iter()
+                .map(|t| t.pretty_print())
+                .collect::<Vec<String>>()
+                .join("");
         }
-    }
-
-    fn parse_named_rule(&mut self) -> ParseResult {
-        let name = self.next().pretty_print();
-        self.expect(&TokenKind::AtAt)?;
-        let head = self.parse_process_list()?;
-        self.expect(&TokenKind::ColonDash)?;
         let guard_or_body = self.parse_process_list()?;
         if self.skip(&TokenKind::Vert) {
             let body = self.parse_process_list()?;
@@ -521,48 +501,44 @@ fn test_parse_atom() {
     assert!(result.is_ok());
 }
 
-#[test]
-fn test_parse_expr() {
-    let source = SourceCode::phony("a(X,b,Y) + b * c(e)".to_owned());
+fn common_init(source: &str, func: fn(&mut Parser) -> ParseResult) -> ParseResult {
+    let source = SourceCode::phony(source.to_owned());
     let mut parser = Parser::new(&source);
     let mut lexer = Lexer::new(&source);
     let result = lexer.lex();
     parser.tokens = result.tokens;
-    let result = parser.parse_expr(0);
+    func(&mut parser)
+}
+
+#[test]
+fn test_parse_expr() {
+    let result = common_init("a(X,b,Y) + b * c(e)", |p| p.parse_expr(0));
     assert!(result.is_ok());
+}
+
+#[test]
+fn test_compicate_process() {
+    let source = SourceCode::phony("a({X,b,Y + b} * c(e)) :- a({X + b :- k. a + c}).".to_owned());
+    let mut parser = Parser::new(&source);
+    let result = parser.parse();
+    assert!(result.errors.is_empty());
 }
 
 #[test]
 fn test_parse_membrane() {
-    let source = SourceCode::phony("{a(X,b,!Y),c(X,Y). a,b,c :- e}".to_owned());
-    let mut parser = Parser::new(&source);
-    let mut lexer = Lexer::new(&source);
-    let result = lexer.lex();
-    parser.tokens = result.tokens;
-    let result = parser.parse_membrane();
-    assert!(result.is_ok());
+    assert!(common_init("{a(X,b,!Y),c(X,Y). a,b,c :- e}", |p| p.parse_membrane()).is_ok());
 }
 
 #[test]
 fn test_parse_rule() {
-    let source = SourceCode::phony("test@@ a(X,b,Y) :- int(A) | c(X,Y)".to_owned());
-    let mut parser = Parser::new(&source);
-    let mut lexer = Lexer::new(&source);
-    let result = lexer.lex();
-    parser.tokens = result.tokens;
-    let result = parser.parse_named_rule();
-    assert!(result.is_ok());
+    assert!(common_init("test@@ a(X,b,Y) :- int(A) | c(X,Y)", |p| p
+        .parse_rule_or_process_list())
+    .is_ok());
 }
 
 #[test]
 fn test_parse_process_list() {
-    let source = SourceCode::phony("a(X,b,Y),c(X,Y)".to_owned());
-    let mut parser = Parser::new(&source);
-    let mut lexer = Lexer::new(&source);
-    let result = lexer.lex();
-    parser.tokens = result.tokens;
-    let result = parser.parse_process_list();
-    assert!(result.is_ok());
+    assert!(common_init("a(X,b,Y),c(X,Y)", |p| p.parse_process_list()).is_ok());
 }
 
 #[test]
