@@ -25,7 +25,6 @@ pub enum ParseError {
     UnexpectedEOF,
     /// Wrong case for an identifier, may be treated as a warning
     WrongCase,
-    Placeholder,
 }
 
 impl Display for ParseError {
@@ -44,7 +43,6 @@ impl Display for ParseError {
             ParseError::WrongCase => {
                 write!(f, "Wrong case")
             }
-            ParseError::Placeholder => todo!(),
         }
     }
 }
@@ -327,7 +325,7 @@ impl<'lex> Parser<'lex> {
             TokenKind::Identifier(name) => {
                 // check if the name starts with a non_uppercase letter
                 if name.starts_with(|c: char| c.is_uppercase()) {
-                    return Err(ParseError::Placeholder);
+                    return Err(ParseError::WrongCase);
                 }
                 self.advance();
                 m_name = name.clone();
@@ -380,7 +378,7 @@ impl<'lex> Parser<'lex> {
             TokenKind::Identifier(name) | TokenKind::Keyword(name) => {
                 // check if the name starts with a non_uppercase letter
                 if name.starts_with(|c: char| c.is_uppercase()) {
-                    return Err(ParseError::Placeholder);
+                    return Err(ParseError::WrongCase);
                 }
                 self.advance();
                 name.clone()
