@@ -4,7 +4,7 @@ authors = ["QRWells <qirui.wang@moegi.waseda.jp>"]
 license = "MIT"
 description = "A compiler for the LMNtal language"
 readme = "README.md"
-repository = "https://github.com/QRWells/lmntalc"
+repository = "https://gitlab.ueda.info.waseda.ac.jp/wang/lmntalc"
 version = "0.1.0"
 edition = "2021"
 
