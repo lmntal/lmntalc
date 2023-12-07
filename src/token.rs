@@ -35,6 +35,8 @@ pub enum TokenKind {
     /// `=`
     Equal,
 
+    // Operators
+
     /// Integer addition (`+`)
     IAdd,
     /// Integer subtraction (`-`)
@@ -218,6 +220,39 @@ impl PartialEq for TokenKind {
             (Self::Operator(_), Self::Operator(_)) => true,
             (Self::Keyword(_), Self::Keyword(_)) => true,
             _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+        }
+    }
+}
+
+impl TokenKind {
+    pub fn is_operator(&self) -> bool {
+        match self {
+            Self::IAdd
+            | Self::ISub
+            | Self::IMul
+            | Self::IDiv
+            | Self::IMod
+            | Self::FAdd
+            | Self::FSub
+            | Self::FMul
+            | Self::FDiv
+            | Self::IGt
+            | Self::ILt
+            | Self::IGe
+            | Self::ILe
+            | Self::IEq
+            | Self::INe
+            | Self::FGt
+            | Self::FLt
+            | Self::FGe
+            | Self::FLe
+            | Self::FEq
+            | Self::FNe
+            | Self::GroundEq
+            | Self::GroundNe
+            | Self::UnaryEq
+            | Self::UnaryNe => true,
+            _ => false,
         }
     }
 }

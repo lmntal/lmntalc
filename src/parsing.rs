@@ -257,7 +257,7 @@ impl<'lex> Parser<'lex> {
     fn parse_process_list(&mut self) -> ParseResult {
         let mut processes = vec![];
         loop {
-            processes.push(self.parse_process()?);
+            processes.push(self.parse_expr(0)?);
             if self.skip(&TokenKind::Comma) {
                 continue;
             } else {
@@ -265,6 +265,45 @@ impl<'lex> Parser<'lex> {
             }
         }
         Ok(ASTNode::ProcessList { processes })
+    }
+
+    fn parse_expr(&mut self, min_bp: u8) -> ParseResult {
+        let op = self.peek().kind.clone();
+        let mut lhs = match op {
+            TokenKind::IAdd | TokenKind::ISub => {
+                let rhs = self.parse_expr(prefix_binding_power(&op))?;
+                ASTNode::Atom {
+                    name: op.to_string(),
+                    args: vec![rhs],
+                }
+            }
+            TokenKind::LeftParen => {
+                self.advance();
+                let expr = self.parse_expr(0)?;
+                self.expect(&TokenKind::RightParen)?;
+                expr
+            }
+            _ => self.parse_process()?,
+        };
+
+        loop {
+            let op = self.peek().kind.clone();
+            if !op.is_operator() {
+                break;
+            }
+            let (left_bp, right_bp) = infix_binding_power(&op);
+            if left_bp < min_bp {
+                break;
+            }
+            self.advance();
+            let rhs = self.parse_expr(right_bp)?;
+            lhs = ASTNode::Atom {
+                name: op.to_string(),
+                args: vec![lhs, rhs],
+            }
+        }
+
+        Ok(lhs)
     }
 
     fn parse_process(&mut self) -> ParseResult {
@@ -377,7 +416,7 @@ impl<'lex> Parser<'lex> {
             let mut children = vec![];
 
             loop {
-                children.push(self.parse_process()?);
+                children.push(self.parse_expr(0)?);
                 if self.skip(&TokenKind::Comma) {
                     continue;
                 } else {
@@ -453,10 +492,20 @@ impl<'lex> Parser<'lex> {
     }
 }
 
-fn infix_binding_power(op: char) -> (u8, u8) {
+fn prefix_binding_power(op: &TokenKind) -> u8 {
     match op {
-        '+' | '-' => (1, 2),
-        '*' | '/' | '%' => (3, 4),
+        TokenKind::ISub | TokenKind::IAdd => 9,
+        _ => unreachable!(),
+    }
+}
+
+fn infix_binding_power(op: &TokenKind) -> (u8, u8) {
+    match op {
+        TokenKind::IAdd | TokenKind::ISub | TokenKind::FAdd | TokenKind::FSub => (3, 4),
+        TokenKind::IMul | TokenKind::IDiv | TokenKind::IMod | TokenKind::FMul | TokenKind::FDiv => {
+            (5, 6)
+        }
+        TokenKind::Equal => (2, 1), // assign need to be right associative and have lowest precedence
         _ => unreachable!(),
     }
 }
@@ -473,6 +522,17 @@ fn test_parse_atom() {
 }
 
 #[test]
+fn test_parse_expr() {
+    let source = SourceCode::phony("a(X,b,Y) + b * c(e)".to_owned());
+    let mut parser = Parser::new(&source);
+    let mut lexer = Lexer::new(&source);
+    let result = lexer.lex();
+    parser.tokens = result.tokens;
+    let result = parser.parse_expr(0);
+    assert!(result.is_ok());
+}
+
+#[test]
 fn test_parse_membrane() {
     let source = SourceCode::phony("{a(X,b,!Y),c(X,Y). a,b,c :- e}".to_owned());
     let mut parser = Parser::new(&source);
@@ -485,7 +545,7 @@ fn test_parse_membrane() {
 
 #[test]
 fn test_parse_rule() {
-    let source = SourceCode::phony("a(X,b,Y) :- int(A) | c(X,Y)".to_owned());
+    let source = SourceCode::phony("test@@ a(X,b,Y) :- int(A) | c(X,Y)".to_owned());
     let mut parser = Parser::new(&source);
     let mut lexer = Lexer::new(&source);
     let result = lexer.lex();
