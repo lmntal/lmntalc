@@ -270,7 +270,7 @@ impl<'lex> Parser<'lex> {
     fn parse_process_list(&mut self) -> ParseResult {
         let mut processes = vec![];
         loop {
-            processes.push(self.parse_expr(0)?);
+            processes.push(self.parse_relation()?);
             if self.skip(&TokenKind::Comma) {
                 continue;
             } else {
@@ -278,6 +278,21 @@ impl<'lex> Parser<'lex> {
             }
         }
         Ok(ASTNode::ProcessList { processes })
+    }
+
+    fn parse_relation(&mut self) -> ParseResult {
+        let lhs = self.parse_expr(0)?;
+        if self.peek().kind.is_relational() {
+            let op = self.peek().kind.clone();
+            self.advance();
+            let rhs = self.parse_expr(0)?;
+            Ok(ASTNode::Atom {
+                name: op.to_string(),
+                args: vec![lhs, rhs],
+            })
+        } else {
+            Ok(lhs)
+        }
     }
 
     /// Parse an expression, using Pratt's algorithm
@@ -302,7 +317,7 @@ impl<'lex> Parser<'lex> {
 
         loop {
             let op = self.peek().kind.clone();
-            if !op.is_operator() {
+            if !op.is_arithmetic() {
                 break;
             }
             let (left_bp, right_bp) = infix_binding_power(&op);
@@ -434,7 +449,7 @@ impl<'lex> Parser<'lex> {
             let mut children = vec![];
 
             loop {
-                children.push(self.parse_expr(0)?);
+                children.push(self.parse_relation()?);
                 if self.skip(&TokenKind::Comma) {
                     continue;
                 } else {
@@ -513,19 +528,17 @@ impl<'lex> Parser<'lex> {
 /// Returns the binding power of the prefix operator
 fn prefix_binding_power(op: &TokenKind) -> u8 {
     match op {
-        TokenKind::ISub | TokenKind::IAdd => 9,
+        TokenKind::ISub | TokenKind::IAdd | TokenKind::FAdd | TokenKind::FSub => 9,
         _ => unreachable!(),
     }
 }
 
 /// Returns the binding power of the infix operator
 fn infix_binding_power(op: &TokenKind) -> (u8, u8) {
+    use TokenKind::*;
     match op {
-        TokenKind::IAdd | TokenKind::ISub | TokenKind::FAdd | TokenKind::FSub => (3, 4),
-        TokenKind::IMul | TokenKind::IDiv | TokenKind::IMod | TokenKind::FMul | TokenKind::FDiv => {
-            (5, 6)
-        }
-        TokenKind::Equal => (2, 1), // assign need to be right associative and have lowest precedence
+        IMul | IDiv | IMod | FMul | FDiv => (3, 4),
+        IAdd | ISub | FAdd | FSub => (1, 2),
         _ => unreachable!(),
     }
 }
@@ -549,6 +562,11 @@ fn test_parse_atom() {
 fn test_parse_expr() {
     let result = common_init("a(X,b,Y) + b * c(e)", |p| p.parse_expr(0));
     assert!(result.is_ok());
+}
+
+#[test]
+fn test_parse_relation() {
+    assert!(common_init("a <. Z", |p| p.parse_relation()).is_ok());
 }
 
 #[test]

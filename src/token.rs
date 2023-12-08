@@ -225,7 +225,7 @@ impl PartialEq for TokenKind {
 
 impl TokenKind {
     /// Is this token an operator?
-    pub fn is_operator(&self) -> bool {
+    pub fn is_arithmetic(&self) -> bool {
         matches!(
             self,
             Self::IAdd
@@ -237,7 +237,13 @@ impl TokenKind {
                 | Self::FSub
                 | Self::FMul
                 | Self::FDiv
-                | Self::IGt
+        )
+    }
+
+    pub fn is_relational(&self) -> bool {
+        matches!(
+            self,
+            Self::IGt
                 | Self::ILt
                 | Self::IGe
                 | Self::ILe
