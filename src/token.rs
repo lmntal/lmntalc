@@ -89,6 +89,12 @@ pub enum TokenKind {
     /// Unary not equal to (`\==`)
     UnaryNe,
 
+    // Hyperlink operators
+    /// Hyperlink fuse (`><` or '>*<' or '>+<')
+    HyperlinkFuse,
+    /// Hyperlink unfuse (`<<` or `>>`)
+    HyperlinkUnify,
+
     // Brackets
     LeftParen,
     RightParen,
@@ -101,7 +107,7 @@ pub enum TokenKind {
 }
 
 /// Keywords in LMNtal.
-pub const KEYWORD: [&str; 5] = ["int", "float", "ground", "unary", "uniq"];
+pub const KEYWORD: [&str; 6] = ["int", "float", "hlink", "ground", "unary", "uniq"];
 
 impl Display for TokenKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -153,6 +159,8 @@ impl Display for TokenKind {
             TokenKind::GroundNe => write!(f, "\\="),
             TokenKind::UnaryEq => write!(f, "==="),
             TokenKind::UnaryNe => write!(f, "\\=="),
+            TokenKind::HyperlinkFuse => write!(f, "><"),
+            TokenKind::HyperlinkUnify => write!(f, "<<"),
         }
     }
 }
@@ -259,6 +267,8 @@ impl TokenKind {
                 | Self::GroundNe
                 | Self::UnaryEq
                 | Self::UnaryNe
+                | Self::HyperlinkFuse
+                | Self::HyperlinkUnify
         )
     }
 }

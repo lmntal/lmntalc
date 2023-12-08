@@ -567,6 +567,9 @@ fn test_parse_expr() {
 #[test]
 fn test_parse_relation() {
     assert!(common_init("a <. Z", |p| p.parse_relation()).is_ok());
+    assert!(common_init("a >< Z", |p| p.parse_relation()).is_ok());
+    assert!(common_init("a << Z", |p| p.parse_relation()).is_ok());
+    assert!(common_init("a =:= Z", |p| p.parse_relation()).is_ok());
 }
 
 #[test]

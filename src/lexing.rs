@@ -454,6 +454,36 @@ impl<'src> Lexer<'src> {
                                 )),
                             }
                         }
+                        Some('+') | Some('*') => {
+                            self.next();
+                            if let Some('<') = self.peek() {
+                                self.next();
+                                Ok(Token::new(
+                                    Span::new(start.into(), self.offset.into()),
+                                    TokenKind::HyperlinkFuse,
+                                ))
+                            } else {
+                                Err(LexError {
+                                    offset: self.offset,
+                                    ty: LexErrorType::Expected('<'),
+                                    recoverable: Some((TokenKind::HyperlinkUnify, tokens.len())),
+                                })
+                            }
+                        }
+                        Some('<') => {
+                            self.next();
+                            Ok(Token::new(
+                                Span::new(start.into(), self.offset.into()),
+                                TokenKind::HyperlinkFuse,
+                            ))
+                        }
+                        Some('>') => {
+                            self.next();
+                            Ok(Token::new(
+                                Span::new(start.into(), self.offset.into()),
+                                TokenKind::HyperlinkUnify,
+                            ))
+                        }
                         _ => Ok(Token::new(
                             Span::new(start.into(), self.offset.into()),
                             TokenKind::IGt,
@@ -485,6 +515,13 @@ impl<'src> Lexer<'src> {
                                     TokenKind::ILe,
                                 )),
                             }
+                        }
+                        Some('<') => {
+                            self.next();
+                            Ok(Token::new(
+                                Span::new(start.into(), self.offset.into()),
+                                TokenKind::HyperlinkUnify,
+                            ))
                         }
                         _ => Ok(Token::new(
                             Span::new(start.into(), self.offset.into()),
