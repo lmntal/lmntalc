@@ -55,7 +55,7 @@ impl Display for ParseError {
             ParseError::UnexpectedToken { expected, found } => {
                 write!(
                     f,
-                    "Unexpected token: expected {}, found {}",
+                    "Unexpected token: expected \'{}\', found \'{}\'",
                     expected, found
                 )
             }
@@ -335,11 +335,11 @@ impl<'lex> Parser<'lex> {
         Ok(lhs)
     }
 
-    /// Parse a process: a(X,b,Y),c(X,Y)
+    /// Parse a process, which can be a membrane, an atom, a link or a context
     fn parse_process(&mut self) -> ParseResult {
-        if let Ok(res) = self.parse_atom() {
+        if let Ok(res) = self.parse_membrane() {
             Ok(res)
-        } else if let Ok(res) = self.parse_membrane() {
+        } else if let Ok(res) = self.parse_atom() {
             Ok(res)
         } else if let Ok(res) = self.parse_link() {
             Ok(res)
@@ -347,7 +347,7 @@ impl<'lex> Parser<'lex> {
             Ok(res)
         } else {
             Err(ParseError::UnexpectedToken {
-                expected: TokenKind::Identifier("".to_owned()),
+                expected: TokenKind::Identifier("any identifier".to_owned()),
                 found: self.peek().kind.clone(),
             })
         }
@@ -357,27 +357,24 @@ impl<'lex> Parser<'lex> {
     fn parse_membrane(&mut self) -> ParseResult {
         let token = self.peek();
         let mut m_name = String::new();
-        match &token.kind {
-            // check if the membrane has a name
-            TokenKind::Identifier(name) => {
-                // check if the name starts with a non_uppercase letter
-                if name.starts_with(|c: char| c.is_uppercase()) {
-                    return Err(ParseError::WrongCase(IdentifierKind::Membrane));
-                }
-                self.advance();
-                m_name = name.clone();
+
+        if let TokenKind::Identifier(name) = &token.kind {
+            // check if the name starts with a non_uppercase letter
+            if name.starts_with(|c: char| c.is_uppercase()) {
+                return Err(ParseError::WrongCase(IdentifierKind::Membrane));
             }
-            // if the membrane has no name, we keep going
-            TokenKind::LeftBrace => {
-                self.advance();
+            self.advance();
+            m_name = name.clone();
+        }
+
+        if !self.skip(&TokenKind::LeftBrace) {
+            if !m_name.is_empty() {
+                self.rewind(); // rewind the name for subsequent parsing since it may be an atom
             }
-            // if the membrane has no name and no left brace, we failed to parse
-            _ => {
-                return Err(ParseError::UnexpectedToken {
-                    expected: TokenKind::Identifier("".to_owned()),
-                    found: token.kind.clone(),
-                })
-            }
+            return Err(ParseError::UnexpectedToken {
+                expected: TokenKind::LeftBrace,
+                found: token.kind.clone(),
+            });
         }
 
         let mut processes = vec![];
@@ -401,6 +398,7 @@ impl<'lex> Parser<'lex> {
         }
 
         self.expect(&TokenKind::RightBrace)?;
+
         Ok(ASTNode::Membrane {
             name: m_name,
             rules,
@@ -434,7 +432,7 @@ impl<'lex> Parser<'lex> {
             }
             _ => {
                 return Err(ParseError::UnexpectedToken {
-                    expected: TokenKind::Identifier("".to_owned()),
+                    expected: TokenKind::Identifier("atom name".to_owned()),
                     found: token.kind.clone(),
                 });
             }
@@ -482,14 +480,11 @@ impl<'lex> Parser<'lex> {
                     hyperlink,
                 })
             } else {
-                Err(ParseError::UnexpectedToken {
-                    expected: TokenKind::Identifier("".to_owned()),
-                    found: token.kind.clone(),
-                })
+                Err(ParseError::WrongCase(IdentifierKind::Link))
             }
         } else {
             Err(ParseError::UnexpectedToken {
-                expected: TokenKind::Identifier("".to_owned()),
+                expected: TokenKind::Identifier("link name".to_owned()),
                 found: token.kind.clone(),
             })
         }
@@ -512,7 +507,7 @@ impl<'lex> Parser<'lex> {
                 }
             } else {
                 Err(ParseError::UnexpectedToken {
-                    expected: TokenKind::Identifier("".to_owned()),
+                    expected: TokenKind::Identifier("context name".to_owned()),
                     found: token.kind.clone(),
                 })
             }
