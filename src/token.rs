@@ -251,7 +251,8 @@ impl TokenKind {
     pub fn is_relational(&self) -> bool {
         matches!(
             self,
-            Self::IGt
+            Self::Equal
+                | Self::IGt
                 | Self::ILt
                 | Self::IGe
                 | Self::ILe
