@@ -42,7 +42,7 @@ fn main() {
     }
 
     if cli.dump_ast {
-        let t = tree(&res.ast);
+        let t = tree(&res.ast, "Root membrane".to_owned());
         match t {
             Ok(t) => println!("{}", t),
             Err(e) => println!("{}", e),

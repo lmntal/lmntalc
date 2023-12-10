@@ -8,15 +8,16 @@ pub enum ASTNode {
     Rule {
         name: String,
         head: Box<ASTNode>,
+        propagation: Option<Box<ASTNode>>,
         guard: Option<Box<ASTNode>>,
-        body: Box<ASTNode>,
+        body: Option<Box<ASTNode>>,
     },
     ProcessList {
         processes: Vec<ASTNode>,
     },
     Membrane {
         name: String,
-        processes: Vec<ASTNode>,
+        process_lists: Vec<ASTNode>,
         rules: Vec<ASTNode>,
     },
     Atom {
@@ -33,32 +34,47 @@ pub enum ASTNode {
 }
 
 /// Convert an AST node to a tree for pretty printing.
-pub fn tree(p: &ASTNode) -> io::Result<Tree<String>> {
-    let mut root = Tree::new(p.name());
+pub fn tree(p: &ASTNode, name: String) -> io::Result<Tree<String>> {
+    let mut root = Tree::new(name);
     match p {
         ASTNode::Rule {
-            head, guard, body, ..
+            head,
+            guard,
+            body,
+            propagation,
+            ..
         } => {
-            root.push(tree(head)?);
-            if let Some(guard) = guard {
-                root.push(tree(guard)?);
+            root.push(tree(head, "Head".to_owned())?);
+            if let Some(propagation) = propagation {
+                root.push(tree(propagation, "Propagation".to_owned())?);
             }
-            root.push(tree(body)?);
+            if let Some(guard) = guard {
+                root.push(tree(guard, "Guard".to_owned())?);
+            }
+            if let Some(body) = body {
+                root.push(tree(body, "Body".to_owned())?);
+            } else {
+                root.push(Tree::new("Empty Body".to_owned()));
+            }
         }
         ASTNode::ProcessList { processes } => {
             for process in processes {
-                root.push(tree(process)?);
+                root.push(tree(process, process.name())?);
             }
         }
         ASTNode::Membrane {
-            processes, rules, ..
+            process_lists,
+            rules,
+            ..
         } => {
-            for process in processes {
-                root.push(tree(process)?);
+            let mut process_lists_tree = Tree::new("Process Lists".to_owned());
+            for process_list in process_lists {
+                process_lists_tree.push(tree(process_list, "Process List".to_owned())?);
             }
+            root.push(process_lists_tree);
             let mut rules_tree = Tree::new("rules".to_owned());
             for rule in rules {
-                rules_tree.push(tree(rule)?);
+                rules_tree.push(tree(rule, rule.name())?);
             }
             root.push(rules_tree);
         }
@@ -66,7 +82,7 @@ pub fn tree(p: &ASTNode) -> io::Result<Tree<String>> {
             if !args.is_empty() {
                 let mut args_tree = Tree::new("args".to_owned());
                 for arg in args {
-                    args_tree.push(tree(arg)?);
+                    args_tree.push(tree(arg, arg.name())?);
                 }
                 root.push(args_tree);
             }
