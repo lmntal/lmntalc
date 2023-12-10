@@ -212,7 +212,7 @@ impl<'lex> Parser<'lex> {
         ParsingResult {
             ast: ASTNode::Membrane {
                 name: "_init".to_owned(),
-                processes,
+                process_lists: processes,
                 rules,
             },
             lexing_errors: result.errors,
@@ -236,9 +236,30 @@ impl<'lex> Parser<'lex> {
         }
         let start = self.pos.get();
         let head = self.parse_process_list()?;
+
+        let mut propagation = None;
+
+        if self.skip(&TokenKind::Backslash) {
+            propagation = Some(Box::new(self.parse_process_list()?));
+        }
+
         if !self.skip(&TokenKind::ColonDash) {
+            // ignore the backslash if it is not followed by a colon dash
+            if let Some(propagation) = propagation {
+                match (head, *propagation) {
+                    (
+                        ASTNode::ProcessList { processes: mut p1 },
+                        ASTNode::ProcessList { processes: mut p2 },
+                    ) => {
+                        p1.append(&mut p2);
+                        return Ok(ASTNode::ProcessList { processes: p1 });
+                    }
+                    _ => unreachable!(),
+                }
+            }
             return Ok(head);
         }
+
         let end = self.pos.get();
         if name.is_empty() {
             name = self.tokens[start..end - 1]
@@ -247,21 +268,44 @@ impl<'lex> Parser<'lex> {
                 .collect::<Vec<String>>()
                 .join("");
         }
+
+        // if the body is empty
+        if self.peek().kind == TokenKind::Dot {
+            return Ok(ASTNode::Rule {
+                name,
+                head: Box::new(head),
+                propagation,
+                guard: None,
+                body: None,
+            });
+        }
+
         let guard_or_body = self.parse_process_list()?;
         if self.skip(&TokenKind::Vert) {
+            if self.peek().kind == TokenKind::Dot {
+                return Ok(ASTNode::Rule {
+                    name,
+                    head: Box::new(head),
+                    propagation,
+                    guard: Some(Box::new(guard_or_body)),
+                    body: None,
+                });
+            }
             let body = self.parse_process_list()?;
             Ok(ASTNode::Rule {
                 name,
                 head: Box::new(head),
+                propagation,
                 guard: Some(Box::new(guard_or_body)),
-                body: Box::new(body),
+                body: Some(Box::new(body)),
             })
         } else {
             Ok(ASTNode::Rule {
                 name,
                 head: Box::new(head),
+                propagation,
                 guard: None,
-                body: Box::new(guard_or_body),
+                body: Some(Box::new(guard_or_body)),
             })
         }
     }
@@ -402,7 +446,7 @@ impl<'lex> Parser<'lex> {
         Ok(ASTNode::Membrane {
             name: m_name,
             rules,
-            processes,
+            process_lists: processes,
         })
     }
 
@@ -605,7 +649,7 @@ fn test_parse_rule_or_process_list() {
 
 #[test]
 fn test_parse_world() {
-    let source = SourceCode::phony("a(X,b,Y),c(X,Y). a,b,c :- 10.".to_owned());
+    let source = SourceCode::phony("a(X,b,Y),c(X,Y). a,b \\ c :- 10.".to_owned());
     let mut parser = Parser::new(&source);
     let result = parser.parse();
     assert!(result.parsing_errors.is_empty());

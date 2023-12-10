@@ -34,6 +34,8 @@ pub enum TokenKind {
     Dollar,
     /// `=`
     Equal,
+    /// `\`
+    Backslash,
 
     // Operators
     /// Integer addition (`+`)
@@ -127,6 +129,7 @@ impl Display for TokenKind {
             TokenKind::Bang => write!(f, "!"),
             TokenKind::Dollar => write!(f, "$"),
             TokenKind::Equal => write!(f, "="),
+            TokenKind::Backslash => write!(f, "\\"),
             TokenKind::LeftParen => write!(f, "("),
             TokenKind::RightParen => write!(f, ")"),
             TokenKind::LeftBracket => write!(f, "["),
@@ -180,6 +183,7 @@ impl From<char> for TokenKind {
             '!' => TokenKind::Bang,
             '$' => TokenKind::Dollar,
             '=' => TokenKind::Equal,
+            '\\' => TokenKind::Backslash,
             '+' => TokenKind::IAdd,
             '-' => TokenKind::ISub,
             '*' => TokenKind::IMul,

@@ -625,11 +625,10 @@ impl<'src> Lexer<'src> {
                                 )),
                             }
                         }
-                        _ => Err(LexError {
-                            offset: self.offset,
-                            ty: LexErrorType::Expected('='),
-                            recoverable: Some((TokenKind::GroundNe, tokens.len())),
-                        }),
+                        _ => Ok(Token::new(
+                            Span::new(start.into(), self.offset.into()),
+                            '\\',
+                        )),
                     }
                 }
                 _ => {
