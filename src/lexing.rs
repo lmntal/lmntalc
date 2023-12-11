@@ -21,6 +21,7 @@ pub enum LexErrorType {
     UncompleteNumber,
     UncompleteString,
     UnclosedQuote,
+    UnclosedComment,
 }
 
 #[derive(Clone, Debug)]
@@ -61,6 +62,9 @@ impl LexError {
             }
             LexErrorType::UnclosedQuote => {
                 format!("{}:{}:{}: unclosed quote", source.name(), line, col)
+            }
+            LexErrorType::UnclosedComment => {
+                format!("{}:{}:{}: unclosed comment", source.name(), line, col)
             }
         }
     }
@@ -415,6 +419,27 @@ impl<'src> Lexer<'src> {
                                 TokenKind::FDiv,
                             ))
                         }
+                        Some('/') => {
+                            self.next();
+                            self.take_while(|c| c != '\n');
+                            continue;
+                        }
+                        Some('*') => {
+                            self.next();
+                            loop {
+                                match self.next() {
+                                    Some('*') => {
+                                        if self.peek() == Some('/') {
+                                            self.next();
+                                            break;
+                                        }
+                                    }
+                                    Some(_) => continue,
+                                    None => break,
+                                }
+                            }
+                            continue;
+                        }
                         _ => Ok(Token::new(
                             Span::new(start.into(), self.offset.into()),
                             TokenKind::IDiv,
@@ -671,6 +696,9 @@ impl<'src> Lexer<'src> {
             }
             LexErrorType::UnclosedQuote => {
                 eprintln!("{}:{}:{}: unclosed quote", self.source.name(), line, col);
+            }
+            LexErrorType::UnclosedComment => {
+                eprintln!("{}:{}:{}: unclosed comment", self.source.name(), line, col);
             }
         }
     }
