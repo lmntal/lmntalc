@@ -1,3 +1,4 @@
+pub mod analyzer;
 pub mod ast;
 pub mod lexing;
 pub mod parsing;
