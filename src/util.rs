@@ -1,7 +1,7 @@
 use std::{
     cmp,
     fmt::Display,
-    ops::{Add, Deref, Sub},
+    ops::{Add, Deref, Range, Sub},
 };
 
 use serde::{Deserialize, Serialize};
@@ -9,6 +9,12 @@ use serde::{Deserialize, Serialize};
 /// A position in a CodeMap.
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd, Debug, Serialize, Deserialize)]
 pub struct Pos(usize);
+
+impl Pos {
+    pub fn as_usize(&self) -> usize {
+        self.0
+    }
+}
 
 impl Display for Pos {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -108,6 +114,12 @@ impl Span {
             low: Pos(0),
             high: Pos(0),
         }
+    }
+}
+
+impl From<Span> for Range<usize> {
+    fn from(val: Span) -> Self {
+        val.low.as_usize()..val.high.as_usize()
     }
 }
 

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{io, path::PathBuf};
 
 use clap::Parser;
 use lmntalc::{
@@ -18,7 +18,7 @@ struct Cli {
     dump_ast: bool,
 }
 
-fn main() {
+fn main() -> io::Result<()> {
     let cli = Cli::parse();
     let path = &cli.source;
 
@@ -31,7 +31,7 @@ fn main() {
 
     let code = SourceCode::new(&cli.source);
     let mut parser = parsing::Parser::new(&code);
-    let res = parser.parse();
+    let mut res = parser.parse();
 
     for e in res.lexing_errors.iter() {
         println!("{}", e.to_string(&code));
@@ -41,6 +41,11 @@ fn main() {
         println!("{}", e);
     }
 
+    let mut analyzer = lmntalc::analyzer::AnalyzerRunner::new(&code);
+    analyzer.analyze(&mut res.ast);
+    analyzer.report_warnings()?;
+    analyzer.report_errors()?;
+
     if cli.dump_ast {
         let t = tree(&res.ast, "Root membrane".to_owned());
         match t {
@@ -48,4 +53,6 @@ fn main() {
             Err(e) => println!("{}", e),
         }
     }
+
+    Ok(())
 }
