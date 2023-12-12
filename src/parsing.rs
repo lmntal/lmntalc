@@ -5,6 +5,7 @@ use crate::{
     lexing::{LexError, Lexer},
     source_code::SourceCode,
     token::{Token, TokenKind},
+    util::Span,
 };
 
 /// A parser for LMNtal source code
@@ -214,6 +215,7 @@ impl<'lex> Parser<'lex> {
                 name: "_init".to_owned(),
                 process_lists: processes,
                 rules,
+                span: Span::new(0usize.into(), self.source.source().len().into()),
             },
             lexing_errors: result.errors,
             parsing_errors: errors,
@@ -235,6 +237,7 @@ impl<'lex> Parser<'lex> {
             self.advance_n(2);
         }
         let start = self.pos.get();
+        let low = self.peek().span.low();
         let head = self.parse_process_list()?;
 
         let mut propagation = None;
@@ -248,11 +251,20 @@ impl<'lex> Parser<'lex> {
             if let Some(propagation) = propagation {
                 match (head, *propagation) {
                     (
-                        ASTNode::ProcessList { processes: mut p1 },
-                        ASTNode::ProcessList { processes: mut p2 },
+                        ASTNode::ProcessList {
+                            processes: mut p1,
+                            span: span1,
+                        },
+                        ASTNode::ProcessList {
+                            processes: mut p2,
+                            span: span2,
+                        },
                     ) => {
                         p1.append(&mut p2);
-                        return Ok(ASTNode::ProcessList { processes: p1 });
+                        return Ok(ASTNode::ProcessList {
+                            processes: p1,
+                            span: span1.merge(span2),
+                        });
                     }
                     _ => unreachable!(),
                 }
@@ -277,6 +289,7 @@ impl<'lex> Parser<'lex> {
                 propagation,
                 guard: None,
                 body: None,
+                span: Span::new(low, self.look_back(1).span.high()),
             });
         }
 
@@ -289,6 +302,7 @@ impl<'lex> Parser<'lex> {
                     propagation,
                     guard: Some(Box::new(guard_or_body)),
                     body: None,
+                    span: Span::new(low, self.look_back(1).span.high()),
                 });
             }
             let body = self.parse_process_list()?;
@@ -298,6 +312,7 @@ impl<'lex> Parser<'lex> {
                 propagation,
                 guard: Some(Box::new(guard_or_body)),
                 body: Some(Box::new(body)),
+                span: Span::new(low, self.look_back(1).span.high()),
             })
         } else {
             Ok(ASTNode::Rule {
@@ -306,6 +321,7 @@ impl<'lex> Parser<'lex> {
                 propagation,
                 guard: None,
                 body: Some(Box::new(guard_or_body)),
+                span: Span::new(low, self.look_back(1).span.high()),
             })
         }
     }
@@ -313,6 +329,7 @@ impl<'lex> Parser<'lex> {
     /// Parse a process list
     fn parse_process_list(&mut self) -> ParseResult {
         let mut processes = vec![];
+        let low = self.peek().span.low();
         loop {
             processes.push(self.parse_relation()?);
             if self.skip(&TokenKind::Comma) {
@@ -321,18 +338,23 @@ impl<'lex> Parser<'lex> {
                 break;
             }
         }
-        Ok(ASTNode::ProcessList { processes })
+        Ok(ASTNode::ProcessList {
+            processes,
+            span: Span::new(low, self.look_back(1).span.high()),
+        })
     }
 
     fn parse_relation(&mut self) -> ParseResult {
         let lhs = self.parse_expr(0)?;
         if self.peek().kind.is_relational() {
             let op = self.peek().kind.clone();
+            let span = self.peek().span;
             self.advance();
             let rhs = self.parse_expr(0)?;
             Ok(ASTNode::Atom {
                 name: op.to_string(),
                 args: vec![lhs, rhs],
+                span,
             })
         } else {
             Ok(lhs)
@@ -342,12 +364,14 @@ impl<'lex> Parser<'lex> {
     /// Parse an expression, using Pratt's algorithm
     fn parse_expr(&mut self, min_bp: u8) -> ParseResult {
         let op = self.peek().kind.clone();
+        let span = self.peek().span;
         let mut lhs = match op {
             TokenKind::IAdd | TokenKind::ISub => {
                 let rhs = self.parse_expr(prefix_binding_power(&op))?;
                 ASTNode::Atom {
                     name: op.to_string(),
                     args: vec![rhs],
+                    span,
                 }
             }
             TokenKind::LeftParen => {
@@ -361,6 +385,7 @@ impl<'lex> Parser<'lex> {
 
         loop {
             let op = self.peek().kind.clone();
+            let span = self.peek().span;
             if !op.is_arithmetic() {
                 break;
             }
@@ -373,6 +398,7 @@ impl<'lex> Parser<'lex> {
             lhs = ASTNode::Atom {
                 name: op.to_string(),
                 args: vec![lhs, rhs],
+                span,
             }
         }
 
@@ -400,6 +426,7 @@ impl<'lex> Parser<'lex> {
     /// Parse a membrane: {a(X,b,Y),c(X,Y). a,b,c :- e}
     fn parse_membrane(&mut self) -> ParseResult {
         let token = self.peek();
+        let span = token.span;
         let mut m_name = String::new();
 
         if let TokenKind::Identifier(name) = &token.kind {
@@ -447,12 +474,14 @@ impl<'lex> Parser<'lex> {
             name: m_name,
             rules,
             process_lists: processes,
+            span,
         })
     }
 
     /// Parse an atom: a(X,b,Y)
     fn parse_atom(&mut self) -> ParseResult {
         let token = self.peek();
+        let span = token.span;
         let name = match &token.kind {
             TokenKind::Identifier(name) | TokenKind::Keyword(name) => {
                 // check if the name starts with a non_uppercase letter
@@ -486,6 +515,7 @@ impl<'lex> Parser<'lex> {
             Ok(ASTNode::Atom {
                 name,
                 args: Vec::new(),
+                span,
             })
         } else {
             let mut children = vec![];
@@ -503,11 +533,13 @@ impl<'lex> Parser<'lex> {
             Ok(ASTNode::Atom {
                 name,
                 args: children,
+                span,
             })
         }
     }
 
     fn parse_link(&mut self) -> ParseResult {
+        let start = self.peek().span.low();
         let hyperlink = if self.peek().kind == TokenKind::Bang {
             self.advance();
             true
@@ -522,6 +554,7 @@ impl<'lex> Parser<'lex> {
                 Ok(ASTNode::Link {
                     name: ident.clone(),
                     hyperlink,
+                    span: Span::new(start, token.span.high()),
                 })
             } else {
                 Err(ParseError::WrongCase(IdentifierKind::Link))
@@ -537,6 +570,7 @@ impl<'lex> Parser<'lex> {
     /// Parse a context: $Context
     fn parse_context(&mut self) -> ParseResult {
         let token = self.peek();
+        let start = token.span.low();
         if let TokenKind::Dollar = token.kind {
             self.advance();
             let token = self.peek();
@@ -545,6 +579,7 @@ impl<'lex> Parser<'lex> {
                     self.advance();
                     Ok(ASTNode::Context {
                         name: ident.clone(),
+                        span: Span::new(start, token.span.high()),
                     })
                 } else {
                     Err(ParseError::WrongCase(IdentifierKind::Context))
@@ -583,6 +618,7 @@ fn infix_binding_power(op: &TokenKind) -> (u8, u8) {
 }
 
 /// Initialize the parser with a phony source code and parse the given function, used for testing
+#[allow(dead_code)]
 fn common_init(source: &str, func: fn(&mut Parser) -> ParseResult) -> ParseResult {
     let source = SourceCode::phony(source.to_owned());
     let mut parser = Parser::new(&source);

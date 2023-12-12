@@ -2,6 +2,8 @@ use std::io;
 
 use termtree::Tree;
 
+use crate::util::Span;
+
 /// An AST node.
 #[derive(Debug)]
 pub enum ASTNode {
@@ -11,26 +13,46 @@ pub enum ASTNode {
         propagation: Option<Box<ASTNode>>,
         guard: Option<Box<ASTNode>>,
         body: Option<Box<ASTNode>>,
+        span: Span,
     },
     ProcessList {
         processes: Vec<ASTNode>,
+        span: Span,
     },
     Membrane {
         name: String,
         process_lists: Vec<ASTNode>,
         rules: Vec<ASTNode>,
+        span: Span,
     },
     Atom {
         name: String,
         args: Vec<ASTNode>,
+        span: Span,
     },
     Link {
         name: String,
         hyperlink: bool,
+        span: Span,
     },
     Context {
         name: String,
+        span: Span,
     },
+}
+
+impl ASTNode {
+    /// Get the span of the AST node.
+    pub fn span(&self) -> Span {
+        match self {
+            ASTNode::Rule { span, .. } => *span,
+            ASTNode::ProcessList { span, .. } => *span,
+            ASTNode::Membrane { span, .. } => *span,
+            ASTNode::Atom { span, .. } => *span,
+            ASTNode::Link { span, .. } => *span,
+            ASTNode::Context { span, .. } => *span,
+        }
+    }
 }
 
 /// Convert an AST node to a tree for pretty printing.
@@ -57,7 +79,7 @@ pub fn tree(p: &ASTNode, name: String) -> io::Result<Tree<String>> {
                 root.push(Tree::new("Empty Body".to_owned()));
             }
         }
-        ASTNode::ProcessList { processes } => {
+        ASTNode::ProcessList { processes, .. } => {
             for process in processes {
                 root.push(tree(process, process.name())?);
             }
@@ -99,7 +121,9 @@ impl ASTNode {
             ASTNode::ProcessList { .. } => "ProcessList".to_string(),
             ASTNode::Membrane { name, .. } => format!("Membrane: {}", name),
             ASTNode::Atom { name, .. } => format!("Atom: {}", name),
-            ASTNode::Link { name, hyperlink } => {
+            ASTNode::Link {
+                name, hyperlink, ..
+            } => {
                 if *hyperlink {
                     format!("HyperLink: {}", name)
                 } else {
