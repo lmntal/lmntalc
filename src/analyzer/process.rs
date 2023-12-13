@@ -1,8 +1,6 @@
-use std::{collections::HashMap, fmt::Display, io, ops::Range};
+use std::{collections::HashMap, fmt::Display};
 
-use ariadne::{Color, ColorGenerator, Fmt, Label, Report, Source};
-
-use crate::{ast::ASTNode, source_code::SourceCode, util::Span};
+use crate::{ast::ASTNode, util::Span, source_code::SourceCode};
 
 use super::Analyzer;
 
@@ -29,24 +27,6 @@ impl ProcessAnalyzerError {
             Self::MultipleOccurrenceOfLink { span, .. } => *span,
         }
     }
-
-    fn colored_string(&self) -> String {
-        match self {
-            Self::SingleOccurrenceOfLink { name, .. } => {
-                format!("Link {} appears {}", name, "only once".fg(Color::Red))
-            }
-            Self::MultipleOccurrenceOfLink { name, .. } => {
-                format!("Link {} appears more than {}", name, "twice".fg(Color::Red))
-            }
-        }
-    }
-
-    fn to_label<'a>(&'a self, source: &'a SourceCode, color: Color) -> Label<(&str, Range<usize>)> {
-        let name = source.name();
-        Label::new((name, self.span().into()))
-            .with_message(self.colored_string())
-            .with_color(color)
-    }
 }
 
 impl Display for ProcessAnalyzerError {
@@ -71,7 +51,7 @@ impl ProcessAnalyzerWarning {
     }
 }
 
-impl<'src> ProcessAnalyzer<'src> {
+impl <'src>ProcessAnalyzer<'src> {
     fn visit(&mut self, process: &ASTNode) {
         match process {
             ASTNode::ProcessList { processes, .. } => {
@@ -132,42 +112,36 @@ impl<'src> ProcessAnalyzer<'src> {
 }
 
 impl<'src> Analyzer<'src> for ProcessAnalyzer<'src> {
+    type Error = Vec<ProcessAnalyzerError>;
+    type Warning = ();
+    type Advice = ();
+
+    fn new(source: &'src SourceCode) -> Self {
+        Self {
+            source,
+            occurrence_counter: vec![],
+            last_occurrence: vec![],
+            errors: vec![],
+        }
+    }
+
+    fn source(&self) -> &'src SourceCode {
+        self.source
+    }
+
     fn analyze(&mut self, process: &mut ASTNode) {
         self.visit(process);
     }
 
-    fn report_errors(&self) -> io::Result<()> {
-        for e in &self.errors {
-            if e.is_empty() {
-                continue;
-            }
-            let mut colors = ColorGenerator::new();
-            let mut report = Report::build(
-                ariadne::ReportKind::Error,
-                self.source.name(),
-                e.first().unwrap().span().low().as_usize(),
-            )
-            .with_message("In this list of processes:");
-            for e in e {
-                report = report.with_label(e.to_label(self.source, colors.next()));
-            }
-            report
-                .finish()
-                .eprint((self.source.name(), Source::from(self.source.source())))?;
-        }
-        Ok(())
+    fn errors(&self) -> &[Self::Error] {
+        &self.errors
     }
 
-    fn report_warnings(&self) -> io::Result<()> {
-        Ok(())
+    fn warnings(&self) -> &[Self::Warning] {
+        todo!()
     }
 
-    fn new(src: &'src crate::source_code::SourceCode) -> Self {
-        Self {
-            source: src,
-            occurrence_counter: Vec::new(),
-            last_occurrence: Vec::new(),
-            errors: Vec::new(),
-        }
+    fn advices(&self) -> &[Self::Advice] {
+        todo!()
     }
 }

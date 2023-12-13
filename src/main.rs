@@ -1,11 +1,15 @@
+mod report;
+
 use std::{io, path::PathBuf};
 
 use clap::Parser;
 use lmntalc::{
+    analyzer::Analyzer,
     ast::tree,
     parsing::{self},
     source_code::SourceCode,
 };
+use report::Reporter;
 
 #[derive(Parser)]
 #[command(name = "LMNtal Compiler")]
@@ -41,10 +45,11 @@ fn main() -> io::Result<()> {
         println!("{}", e);
     }
 
-    let mut analyzer = lmntalc::analyzer::AnalyzerRunner::new(&code);
+    let mut analyzer = lmntalc::analyzer::process::ProcessAnalyzer::new(&code);
     analyzer.analyze(&mut res.ast);
-    analyzer.report_warnings()?;
     analyzer.report_errors()?;
+    analyzer.report_warnings()?;
+    analyzer.report_advices()?;
 
     if cli.dump_ast {
         let t = tree(&res.ast, "Root membrane".to_owned());
