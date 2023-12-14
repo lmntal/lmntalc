@@ -4,10 +4,10 @@ use std::{io, path::PathBuf};
 
 use clap::Parser;
 use lmntalc::{
-    analyzer::Analyzer,
+    analyzer::analyze,
     ast::tree,
     parsing::{self},
-    source_code::SourceCode,
+    util::SourceCode,
 };
 use report::Reporter;
 
@@ -35,21 +35,11 @@ fn main() -> io::Result<()> {
 
     let code = SourceCode::new(&cli.source);
     let mut parser = parsing::Parser::new(&code);
-    let mut res = parser.parse();
+    let res = parser.parse();
+    res.report(&code)?;
 
-    for e in res.lexing_errors.iter() {
-        println!("{}", e.to_string(&code));
-    }
-
-    for e in res.parsing_errors.iter() {
-        println!("{}", e);
-    }
-
-    let mut analyzer = lmntalc::analyzer::process::ProcessAnalyzer::new(&code);
-    analyzer.analyze(&mut res.ast);
-    analyzer.report_errors()?;
-    analyzer.report_warnings()?;
-    analyzer.report_advices()?;
+    let analysis_res = analyze(&res.ast);
+    analysis_res.report(&code)?;
 
     if cli.dump_ast {
         let t = tree(&res.ast, "Root membrane".to_owned());

@@ -2,69 +2,215 @@ use std::{io, ops::Range};
 
 use ariadne::{Color, ColorGenerator, Fmt, Label, Report, Source};
 use lmntalc::{
-    analyzer::{
-        process::{ProcessAnalyzer, ProcessAnalyzerError},
-        Analyzer,
-    },
-    source_code::SourceCode,
+    analyzer::{SemanticAnalysisResult, SemanticError},
+    lexing::{LexError, LexErrorType},
+    parsing::{ParseError, ParseErrorType, ParsingResult},
+    util::SourceCode,
 };
 
 pub trait Reportable {
-    fn label<'a>(&'a self, source: &'a SourceCode, color: Color) -> Label<(&str, Range<usize>)>;
-    fn colored_string(&self) -> String;
+    fn labels<'a>(
+        &'a self,
+        source: &'a SourceCode,
+        colors: &mut ColorGenerator,
+    ) -> Vec<Label<(&str, Range<usize>)>>;
+    fn message(&self) -> String;
 }
 
-pub trait Reporter {
-    fn report_advices(&self) -> io::Result<()> {
-        Ok(())
-    }
-    fn report_warnings(&self) -> io::Result<()>;
-    fn report_errors(&self) -> io::Result<()>;
-}
-
-impl Reporter for ProcessAnalyzer<'_> {
-    fn report_warnings(&self) -> io::Result<()> {
+pub trait Reporter<'src> {
+    fn report_advices(&self, _source: &'src SourceCode) -> io::Result<()> {
         Ok(())
     }
 
-    fn report_errors(&self) -> io::Result<()> {
-        for e in self.errors() {
-            if e.is_empty() {
-                continue;
-            }
+    fn report_warnings(&self, _source: &'src SourceCode) -> io::Result<()> {
+        Ok(())
+    }
+
+    fn report_errors(&self, _source: &'src SourceCode) -> io::Result<()> {
+        Ok(())
+    }
+
+    fn report(&self, source: &'src SourceCode) -> io::Result<()> {
+        self.report_advices(source)?;
+        self.report_warnings(source)?;
+        self.report_errors(source)
+    }
+}
+
+impl<'src> Reporter<'src> for SemanticAnalysisResult {
+    fn report_errors(&self, source: &'src SourceCode) -> io::Result<()> {
+        for e in &self.errors {
             let mut colors = ColorGenerator::new();
             let mut report = Report::build(
                 ariadne::ReportKind::Error,
-                self.source().name(),
-                e.first().unwrap().span().low().as_usize(),
+                source.name(),
+                e.span().low().as_usize(),
             )
-            .with_message("In this list of processes:");
-            for e in e {
-                report = report.with_label(e.label(self.source(), colors.next()));
+            .with_message(e.message());
+            report = report.with_labels(e.labels(source, &mut colors));
+            report
+                .finish()
+                .eprint((source.name(), Source::from(source.source())))?;
+        }
+        Ok(())
+    }
+
+    fn report(&self, source: &'src SourceCode) -> io::Result<()> {
+        self.report_errors(source)
+    }
+}
+
+impl<'src> Reporter<'src> for ParsingResult {
+    fn report_warnings(&self, _source: &'src SourceCode) -> io::Result<()> {
+        Ok(())
+    }
+
+    fn report_errors(&self, source: &'src SourceCode) -> io::Result<()> {
+        for e in &self.lexing_errors {
+            let mut colors = ColorGenerator::new();
+            let mut report = Report::build(ariadne::ReportKind::Error, source.name(), e.offset)
+                .with_message(e.message());
+            report = report.with_labels(e.labels(source, &mut colors));
+            if let Some(recover) = &e.recoverable {
+                report = report.with_help(format!(
+                    "Did you mean this: {}?",
+                    recover.0.to_string().fg(Color::Blue)
+                ));
             }
             report
                 .finish()
-                .eprint((self.source().name(), Source::from(self.source().source())))?;
+                .eprint((source.name(), Source::from(source.source())))?;
         }
+
+        for e in &self.parsing_errors {
+            let mut colors = ColorGenerator::new();
+            let mut report = Report::build(
+                ariadne::ReportKind::Error,
+                source.name(),
+                e.span.low().as_usize(),
+            )
+            .with_message(e.message());
+            report = report.with_labels(e.labels(source, &mut colors));
+            report
+                .finish()
+                .eprint((source.name(), Source::from(source.source())))?;
+        }
+
         Ok(())
     }
 }
 
-impl Reportable for ProcessAnalyzerError {
-    fn label<'a>(&'a self, source: &'a SourceCode, color: Color) -> Label<(&str, Range<usize>)> {
-        let name = source.name();
-        Label::new((name, self.span().into()))
-            .with_message(self.colored_string())
-            .with_color(color)
+impl Reportable for LexError {
+    fn message(&self) -> String {
+        match self.ty {
+            lmntalc::lexing::LexErrorType::Expected(c) => {
+                format!("Expected {}", c.to_string().fg(Color::Blue))
+            }
+            lmntalc::lexing::LexErrorType::UnexpectedCharacter(c) => {
+                format!("Unexpected {}", c.to_string().fg(Color::Red))
+            }
+            lmntalc::lexing::LexErrorType::UncompleteNumber => "Uncomplete number".to_owned(),
+            lmntalc::lexing::LexErrorType::UncompleteString => "Uncomplete string".to_owned(),
+            lmntalc::lexing::LexErrorType::UnclosedQuote => "Unclosed quote".to_owned(),
+            lmntalc::lexing::LexErrorType::UnclosedComment => "Unclosed comment".to_owned(),
+            lmntalc::lexing::LexErrorType::UnmatchedBracket(c, _) => {
+                format!("Unmatched bracket '{}'", c.to_string().fg(Color::Blue))
+            }
+        }
     }
 
-    fn colored_string(&self) -> String {
-        match self {
-            ProcessAnalyzerError::SingleOccurrenceOfLink { name, .. } => {
-                format!("Link {} appears {}", name, "only once".fg(Color::Red))
+    fn labels<'a>(
+        &'a self,
+        source: &'a SourceCode,
+        colors: &mut ColorGenerator,
+    ) -> Vec<Label<(&str, Range<usize>)>> {
+        let mut labels = vec![];
+        if let LexErrorType::UnmatchedBracket(_, offset) = self.ty {
+            let label = Label::new((source.name(), offset..offset + 1))
+                .with_message("Did you forget to close the bracket here?".to_string())
+                .with_color(colors.next());
+            labels.push(label);
+        }
+        labels
+    }
+}
+
+impl Reportable for ParseError {
+    fn labels<'a>(
+        &'a self,
+        source: &'a SourceCode,
+        colors: &mut ColorGenerator,
+    ) -> Vec<Label<(&str, Range<usize>)>> {
+        vec![Label::new((source.name(), self.span.into()))
+            .with_message(self.message())
+            .with_color(colors.next())]
+    }
+
+    fn message(&self) -> String {
+        match &self.ty {
+            ParseErrorType::UnexpectedToken { expected, found } => {
+                format!(
+                    "Expected {}, but found {}",
+                    expected.to_string().fg(Color::Blue),
+                    found.to_string().fg(Color::Red)
+                )
             }
-            ProcessAnalyzerError::MultipleOccurrenceOfLink { name, .. } => {
-                format!("Link {} appears more than {}", name, "twice".fg(Color::Red))
+            ParseErrorType::UnexpectedEOF => "Unexpected end of file".to_string(),
+            ParseErrorType::WrongCase(ty) => {
+                format!("The identifier should {}.", ty.should().fg(Color::Blue))
+            }
+        }
+    }
+}
+
+impl Reportable for SemanticError {
+    fn labels<'a>(
+        &'a self,
+        source: &'a SourceCode,
+        colors: &mut ColorGenerator,
+    ) -> Vec<Label<(&str, Range<usize>)>> {
+        let mut labels = vec![];
+        match self {
+            SemanticError::MultipleLinkOccurrence { spans, .. } => {
+                let first = spans.first().unwrap();
+                let label = Label::new((source.name(), (*first).into()))
+                    .with_message("This is the first occurrence of this link".to_string())
+                    .with_color(colors.next());
+                labels.push(label);
+
+                for span in spans.iter().skip(1) {
+                    let label = Label::new((source.name(), (*span).into()))
+                        .with_message("These are the other occurrences of this link".to_string())
+                        .with_color(colors.next());
+                    labels.push(label);
+                }
+            }
+            SemanticError::FreeLinkOccurrence { span, .. } => {
+                let label = Label::new((source.name(), (*span).into()))
+                    .with_message("At here".to_string())
+                    .with_color(colors.next());
+                labels.push(label);
+            }
+            SemanticError::TopLevelLinkOccurrence { span, .. } => {
+                let label = Label::new((source.name(), (*span).into()))
+                    .with_message("At here".to_string())
+                    .with_color(colors.next());
+                labels.push(label)
+            }
+        }
+        labels
+    }
+
+    fn message(&self) -> String {
+        match self {
+            SemanticError::MultipleLinkOccurrence { link, .. } => {
+                format!("Multiple occurrence of link {}", link)
+            }
+            SemanticError::FreeLinkOccurrence { link, .. } => {
+                format!("Free link {} is not allowed", link)
+            }
+            SemanticError::TopLevelLinkOccurrence { .. } => {
+                "Top level link is not allowed".to_string()
             }
         }
     }

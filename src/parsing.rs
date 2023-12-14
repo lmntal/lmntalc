@@ -3,9 +3,8 @@ use std::{cell::Cell, fmt::Display};
 use crate::{
     ast::ASTNode,
     lexing::{LexError, Lexer},
-    source_code::SourceCode,
     token::{Token, TokenKind},
-    util::Span,
+    util::{SourceCode, Span},
 };
 
 /// A parser for LMNtal source code
@@ -17,7 +16,7 @@ pub struct Parser<'lex> {
 }
 
 #[derive(Debug)]
-pub enum ParseError {
+pub enum ParseErrorType {
     UnexpectedToken {
         expected: TokenKind,
         found: TokenKind,
@@ -28,6 +27,12 @@ pub enum ParseError {
 }
 
 #[derive(Debug)]
+pub struct ParseError {
+    pub ty: ParseErrorType,
+    pub span: Span,
+}
+
+#[derive(Debug)]
 pub enum IdentifierKind {
     Atom,
     Membrane,
@@ -35,6 +40,20 @@ pub enum IdentifierKind {
     Process,
     Link,
     Context,
+}
+
+impl IdentifierKind {
+    pub fn should(&self) -> String {
+        match self {
+            IdentifierKind::Atom => "start with a lowercase letter",
+            IdentifierKind::Membrane => "start with a lowercase letter",
+            IdentifierKind::Rule => "start with a lowercase letter",
+            IdentifierKind::Process => "start with a lowercase letter",
+            IdentifierKind::Link => "start with an uppercase letter",
+            IdentifierKind::Context => "start with a lowercase letter",
+        }
+        .to_owned()
+    }
 }
 
 impl Display for IdentifierKind {
@@ -50,20 +69,20 @@ impl Display for IdentifierKind {
     }
 }
 
-impl Display for ParseError {
+impl Display for ParseErrorType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ParseError::UnexpectedToken { expected, found } => {
+            Self::UnexpectedToken { expected, found } => {
                 write!(
                     f,
                     "Unexpected token: expected \'{}\', found \'{}\'",
                     expected, found
                 )
             }
-            ParseError::UnexpectedEOF => {
+            Self::UnexpectedEOF => {
                 write!(f, "Unexpected EOF")
             }
-            ParseError::WrongCase(id) => {
+            Self::WrongCase(id) => {
                 write!(f, "Wrong case for {}", id)
             }
         }
@@ -125,9 +144,12 @@ impl<'lex> Parser<'lex> {
         if self.is_match(kind) {
             Ok(self.next())
         } else {
-            Err(ParseError::UnexpectedToken {
-                expected: kind.clone(),
-                found: self.peek().kind.clone(),
+            Err(ParseError {
+                ty: ParseErrorType::UnexpectedToken {
+                    expected: kind.clone(),
+                    found: self.peek().kind.clone(),
+                },
+                span: self.peek().span,
             })
         }
     }
@@ -416,9 +438,12 @@ impl<'lex> Parser<'lex> {
         } else if let Ok(res) = self.parse_context() {
             Ok(res)
         } else {
-            Err(ParseError::UnexpectedToken {
-                expected: TokenKind::Identifier("any identifier".to_owned()),
-                found: self.peek().kind.clone(),
+            Err(ParseError {
+                ty: ParseErrorType::UnexpectedToken {
+                    expected: TokenKind::Identifier("any identifier".to_owned()),
+                    found: self.peek().kind.clone(),
+                },
+                span: self.peek().span,
             })
         }
     }
@@ -432,7 +457,10 @@ impl<'lex> Parser<'lex> {
         if let TokenKind::Identifier(name) = &token.kind {
             // check if the name starts with a non_uppercase letter
             if name.starts_with(|c: char| c.is_uppercase()) {
-                return Err(ParseError::WrongCase(IdentifierKind::Membrane));
+                return Err(ParseError {
+                    ty: ParseErrorType::WrongCase(IdentifierKind::Membrane),
+                    span: self.peek().span,
+                });
             }
             self.advance();
             m_name = name.clone();
@@ -442,9 +470,13 @@ impl<'lex> Parser<'lex> {
             if !m_name.is_empty() {
                 self.rewind(); // rewind the name for subsequent parsing since it may be an atom
             }
-            return Err(ParseError::UnexpectedToken {
-                expected: TokenKind::LeftBrace,
-                found: token.kind.clone(),
+
+            return Err(ParseError {
+                ty: ParseErrorType::UnexpectedToken {
+                    expected: TokenKind::LeftBrace,
+                    found: token.kind.clone(),
+                },
+                span: self.peek().span,
             });
         }
 
@@ -486,7 +518,10 @@ impl<'lex> Parser<'lex> {
             TokenKind::Identifier(name) | TokenKind::Keyword(name) => {
                 // check if the name starts with a non_uppercase letter
                 if name.starts_with(|c: char| c.is_uppercase()) {
-                    return Err(ParseError::WrongCase(IdentifierKind::Atom));
+                    return Err(ParseError {
+                        ty: ParseErrorType::WrongCase(IdentifierKind::Atom),
+                        span: self.peek().span,
+                    });
                 }
                 self.advance();
                 name.clone()
@@ -504,9 +539,12 @@ impl<'lex> Parser<'lex> {
                 f.to_string()
             }
             _ => {
-                return Err(ParseError::UnexpectedToken {
-                    expected: TokenKind::Identifier("atom name".to_owned()),
-                    found: token.kind.clone(),
+                return Err(ParseError {
+                    ty: ParseErrorType::UnexpectedToken {
+                        expected: TokenKind::Identifier("atom name".to_owned()),
+                        found: self.peek().kind.clone(),
+                    },
+                    span: self.peek().span,
                 });
             }
         };
@@ -557,12 +595,18 @@ impl<'lex> Parser<'lex> {
                     span: Span::new(start, token.span.high()),
                 })
             } else {
-                Err(ParseError::WrongCase(IdentifierKind::Link))
+                Err(ParseError {
+                    ty: ParseErrorType::WrongCase(IdentifierKind::Link),
+                    span: self.peek().span,
+                })
             }
         } else {
-            Err(ParseError::UnexpectedToken {
-                expected: TokenKind::Identifier("link name".to_owned()),
-                found: token.kind.clone(),
+            Err(ParseError {
+                ty: ParseErrorType::UnexpectedToken {
+                    expected: TokenKind::Identifier("link name".to_owned()),
+                    found: self.peek().kind.clone(),
+                },
+                span: self.peek().span,
             })
         }
     }
@@ -582,18 +626,27 @@ impl<'lex> Parser<'lex> {
                         span: Span::new(start, token.span.high()),
                     })
                 } else {
-                    Err(ParseError::WrongCase(IdentifierKind::Context))
+                    Err(ParseError {
+                        ty: ParseErrorType::WrongCase(IdentifierKind::Context),
+                        span: self.peek().span,
+                    })
                 }
             } else {
-                Err(ParseError::UnexpectedToken {
-                    expected: TokenKind::Identifier("context name".to_owned()),
-                    found: token.kind.clone(),
+                Err(ParseError {
+                    ty: ParseErrorType::UnexpectedToken {
+                        expected: TokenKind::Identifier("context name".to_owned()),
+                        found: self.peek().kind.clone(),
+                    },
+                    span: self.peek().span,
                 })
             }
         } else {
-            Err(ParseError::UnexpectedToken {
-                expected: TokenKind::Dollar,
-                found: token.kind.clone(),
+            Err(ParseError {
+                ty: ParseErrorType::UnexpectedToken {
+                    expected: TokenKind::Dollar,
+                    found: self.peek().kind.clone(),
+                },
+                span: self.peek().span,
             })
         }
     }

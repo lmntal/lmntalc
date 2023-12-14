@@ -5,7 +5,7 @@ license = "MIT"
 description = "A compiler for the LMNtal language"
 readme = "README.md"
 repository = "https://gitlab.ueda.info.waseda.ac.jp/wang/lmntalc"
-version = "0.2.3"
+version = "0.3.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -13,7 +13,6 @@ edition = "2021"
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-env_logger = "0.10"
 ariadne = { version = "0.3", features = ["auto-color"] }
 clap = { version = "4.4", features = ["derive"] }
 termtree = "0.4"

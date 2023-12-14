@@ -1,15 +1,13 @@
 use std::{iter::Peekable, str::Chars};
 
 use crate::{
-    source_code::SourceCode,
     token::{Token, TokenKind, KEYWORD},
-    util::Span,
+    util::{SourceCode, Span},
 };
 
 /// A lexer for LMNtal.
 #[derive(Debug, Clone)]
 pub struct Lexer<'src> {
-    source: &'src SourceCode,
     src: Peekable<Chars<'src>>,
     offset: usize,
 }
@@ -17,7 +15,10 @@ pub struct Lexer<'src> {
 #[derive(Clone, Debug)]
 pub enum LexErrorType {
     Expected(char),
+    /// Unexpected character with the character
     UnexpectedCharacter(char),
+    /// Unclosed bracket with the character and the offset of the pair
+    UnmatchedBracket(char, usize),
     UncompleteNumber,
     UncompleteString,
     UnclosedQuote,
@@ -66,6 +67,16 @@ impl LexError {
             LexErrorType::UnclosedComment => {
                 format!("{}:{}:{}: unclosed comment", source.name(), line, col)
             }
+            LexErrorType::UnmatchedBracket(c, offset) => {
+                let (pair_line, pair_col) = source.line_col(*offset);
+                format!(
+                    "{}:{}:{}: unclosed bracket '{}'",
+                    source.name(),
+                    pair_line,
+                    pair_col,
+                    c,
+                )
+            }
         }
     }
 }
@@ -74,7 +85,6 @@ impl LexError {
 impl<'src> Lexer<'src> {
     pub fn new(src: &'src SourceCode) -> Self {
         Self {
-            source: src,
             src: src.source().chars().peekable(),
             offset: 0,
         }
@@ -293,10 +303,16 @@ impl<'src> Lexer<'src> {
                         Some((_, '(')) => {
                             Ok(Token::new(Span::new(start.into(), self.offset.into()), ')'))
                         }
-                        _ => {
-                            let (line, col) = self.source.line_col(start);
-                            panic!("Unbalanced parentheses at {}:{}", line, col)
-                        }
+                        Some((pair, _)) => Err(LexError {
+                            offset: self.offset,
+                            ty: LexErrorType::UnmatchedBracket('(', pair),
+                            recoverable: None,
+                        }),
+                        _ => Err(LexError {
+                            offset: self.offset,
+                            ty: LexErrorType::UnmatchedBracket('(', 0),
+                            recoverable: None,
+                        }),
                     }
                 }
                 ']' => {
@@ -305,10 +321,16 @@ impl<'src> Lexer<'src> {
                         Some((_, '[')) => {
                             Ok(Token::new(Span::new(start.into(), self.offset.into()), ']'))
                         }
-                        _ => {
-                            let (line, col) = self.source.line_col(start);
-                            panic!("Unbalanced brackets at {}:{}", line, col)
-                        }
+                        Some((pair, _)) => Err(LexError {
+                            offset: self.offset,
+                            ty: LexErrorType::UnmatchedBracket('[', pair),
+                            recoverable: None,
+                        }),
+                        _ => Err(LexError {
+                            offset: self.offset,
+                            ty: LexErrorType::UnmatchedBracket('[', 0),
+                            recoverable: None,
+                        }),
                     }
                 }
                 '}' => {
@@ -317,10 +339,16 @@ impl<'src> Lexer<'src> {
                         Some((_, '{')) => {
                             Ok(Token::new(Span::new(start.into(), self.offset.into()), '}'))
                         }
-                        _ => {
-                            let (line, col) = self.source.line_col(start);
-                            panic!("Unbalanced braces at {}:{}", line, col);
-                        }
+                        Some((pair, _)) => Err(LexError {
+                            offset: self.offset,
+                            ty: LexErrorType::UnmatchedBracket('{', pair),
+                            recoverable: None,
+                        }),
+                        _ => Err(LexError {
+                            offset: self.offset,
+                            ty: LexErrorType::UnmatchedBracket('{', 0),
+                            recoverable: None,
+                        }),
                     }
                 }
                 '@' => {
@@ -670,37 +698,16 @@ impl<'src> Lexer<'src> {
                 Err(err) => errors.push(err),
             }
         }
-        LexingResult { tokens, errors }
-    }
-
-    pub fn report_error(&self, err: LexError) {
-        let (line, col) = self.source.line_col(err.offset);
-        match err.ty {
-            LexErrorType::Expected(c) => {
-                eprintln!("{}:{}:{}: expected '{}'", self.source.name(), line, col, c);
-            }
-            LexErrorType::UnexpectedCharacter(c) => {
-                eprintln!(
-                    "{}:{}:{}: unexpected character '{}'",
-                    self.source.name(),
-                    line,
-                    col,
-                    c
-                );
-            }
-            LexErrorType::UncompleteNumber => {
-                eprintln!("{}:{}:{}: uncomplete number", self.source.name(), line, col);
-            }
-            LexErrorType::UncompleteString => {
-                eprintln!("{}:{}:{}: uncomplete string", self.source.name(), line, col);
-            }
-            LexErrorType::UnclosedQuote => {
-                eprintln!("{}:{}:{}: unclosed quote", self.source.name(), line, col);
-            }
-            LexErrorType::UnclosedComment => {
-                eprintln!("{}:{}:{}: unclosed comment", self.source.name(), line, col);
+        if !bracket_stack.is_empty() {
+            for (offset, c) in bracket_stack {
+                errors.push(LexError {
+                    offset,
+                    ty: LexErrorType::UnmatchedBracket(c, 0),
+                    recoverable: None,
+                });
             }
         }
+        LexingResult { tokens, errors }
     }
 }
 
