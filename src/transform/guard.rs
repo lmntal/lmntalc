@@ -18,7 +18,7 @@ pub(super) fn visit_guard(rule: &mut Rule, process_list: &ASTNode) -> Guard {
                     AtomName::Operator(Operator::Equal) => {
                         assert!(args.len() == 2);
                         let lhs = match &args[0] {
-                            ASTNode::Atom { name, .. } => name.to_string(),
+                            ASTNode::Link { name, .. } => name.to_string(),
                             _ => unreachable!(),
                         };
                         let rhs = &args[1];
