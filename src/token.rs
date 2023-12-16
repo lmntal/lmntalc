@@ -14,7 +14,6 @@ pub enum TokenKind {
     Float(f64),
     Char(char),
     String(String),
-    Operator(String),
     Keyword(String),
 
     // Reserved operators
@@ -32,12 +31,27 @@ pub enum TokenKind {
     Bang,
     /// `$`
     Dollar,
-    /// `=`
-    Equal,
     /// `\`
     Backslash,
 
-    // Operators
+    /// Operators
+    Operator(Operator),
+
+    // Brackets
+    LeftParen,
+    RightParen,
+    LeftBracket,
+    RightBracket,
+    LeftBrace,
+    RightBrace,
+
+    EOF,
+}
+
+#[derive(Clone, Debug, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum Operator {
+    /// Equal (`=`)
+    Equal,
     /// Integer addition (`+`)
     IAdd,
     /// Integer subtraction (`-`)
@@ -96,16 +110,6 @@ pub enum TokenKind {
     HyperlinkFuse,
     /// Hyperlink unfuse (`<<` or `>>`)
     HyperlinkUnify,
-
-    // Brackets
-    LeftParen,
-    RightParen,
-    LeftBracket,
-    RightBracket,
-    LeftBrace,
-    RightBrace,
-
-    EOF,
 }
 
 /// Keywords in LMNtal.
@@ -128,7 +132,6 @@ impl Display for TokenKind {
             TokenKind::Vert => write!(f, "|"),
             TokenKind::Bang => write!(f, "!"),
             TokenKind::Dollar => write!(f, "$"),
-            TokenKind::Equal => write!(f, "="),
             TokenKind::Backslash => write!(f, "\\"),
             TokenKind::LeftParen => write!(f, "("),
             TokenKind::RightParen => write!(f, ")"),
@@ -137,40 +140,7 @@ impl Display for TokenKind {
             TokenKind::LeftBrace => write!(f, "{{"),
             TokenKind::RightBrace => write!(f, "}}"),
             TokenKind::EOF => write!(f, "<EOF>"),
-            TokenKind::IAdd => write!(f, "+"),
-            TokenKind::ISub => write!(f, "-"),
-            TokenKind::IMul => write!(f, "*"),
-            TokenKind::IDiv => write!(f, "/"),
-            TokenKind::IMod => write!(f, "%"),
-            TokenKind::FAdd => write!(f, "+."),
-            TokenKind::FSub => write!(f, "-."),
-            TokenKind::FMul => write!(f, "*."),
-            TokenKind::FDiv => write!(f, "/."),
-            TokenKind::IGt => write!(f, ">"),
-            TokenKind::ILt => write!(f, "<"),
-            TokenKind::IGe => write!(f, ">="),
-            TokenKind::ILe => write!(f, "<="),
-            TokenKind::IEq => write!(f, "=:=."),
-            TokenKind::INe => write!(f, "=\\=."),
-            TokenKind::FGt => write!(f, ">."),
-            TokenKind::FLt => write!(f, "<."),
-            TokenKind::FGe => write!(f, ">=."),
-            TokenKind::FLe => write!(f, "<=."),
-            TokenKind::FEq => write!(f, "=:=."),
-            TokenKind::FNe => write!(f, "=\\=."),
-            TokenKind::GroundEq => write!(f, "=="),
-            TokenKind::GroundNe => write!(f, "\\="),
-            TokenKind::UnaryEq => write!(f, "==="),
-            TokenKind::UnaryNe => write!(f, "\\=="),
-            TokenKind::HyperlinkFuse => write!(f, "><"),
-            TokenKind::HyperlinkUnify => write!(f, "<<"),
         }
-    }
-}
-
-impl From<String> for TokenKind {
-    fn from(other: String) -> TokenKind {
-        TokenKind::Identifier(other)
     }
 }
 
@@ -182,15 +152,15 @@ impl From<char> for TokenKind {
             '|' => TokenKind::Vert,
             '!' => TokenKind::Bang,
             '$' => TokenKind::Dollar,
-            '=' => TokenKind::Equal,
+            '=' => TokenKind::Operator(Operator::Equal),
             '\\' => TokenKind::Backslash,
-            '+' => TokenKind::IAdd,
-            '-' => TokenKind::ISub,
-            '*' => TokenKind::IMul,
-            '/' => TokenKind::IDiv,
-            '%' => TokenKind::IMod,
-            '>' => TokenKind::IGt,
-            '<' => TokenKind::ILt,
+            '+' => TokenKind::Operator(Operator::IAdd),
+            '-' => TokenKind::Operator(Operator::ISub),
+            '*' => TokenKind::Operator(Operator::IMul),
+            '/' => TokenKind::Operator(Operator::IDiv),
+            '%' => TokenKind::Operator(Operator::IMod),
+            '>' => TokenKind::Operator(Operator::IGt),
+            '<' => TokenKind::Operator(Operator::ILt),
             '(' => TokenKind::LeftParen,
             ')' => TokenKind::RightParen,
             '[' => TokenKind::LeftBracket,
@@ -202,9 +172,26 @@ impl From<char> for TokenKind {
     }
 }
 
-impl<'a> From<&'a str> for TokenKind {
-    fn from(other: &'a str) -> TokenKind {
-        TokenKind::Identifier(other.to_string())
+impl TokenKind {
+    pub fn is_relational(&self) -> bool {
+        matches!(self, Self::Operator(o) if o.is_relational())
+    }
+
+    pub fn is_arithmetic(&self) -> bool {
+        matches!(self, Self::Operator(o) if o.is_arithmetic())
+    }
+
+    pub fn operator(&self) -> Option<Operator> {
+        match self {
+            Self::Operator(o) => Some(*o),
+            _ => None,
+        }
+    }
+}
+
+impl From<String> for TokenKind {
+    fn from(other: String) -> TokenKind {
+        TokenKind::Identifier(other)
     }
 }
 
@@ -235,7 +222,7 @@ impl PartialEq for TokenKind {
     }
 }
 
-impl TokenKind {
+impl Operator {
     /// Is this token an operator?
     pub fn is_arithmetic(&self) -> bool {
         matches!(
@@ -275,6 +262,41 @@ impl TokenKind {
                 | Self::HyperlinkFuse
                 | Self::HyperlinkUnify
         )
+    }
+}
+
+impl Display for Operator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Operator::Equal => write!(f, "="),
+            Operator::IAdd => write!(f, "+"),
+            Operator::ISub => write!(f, "-"),
+            Operator::IMul => write!(f, "*"),
+            Operator::IDiv => write!(f, "/"),
+            Operator::IMod => write!(f, "%"),
+            Operator::FAdd => write!(f, "+."),
+            Operator::FSub => write!(f, "-."),
+            Operator::FMul => write!(f, "*."),
+            Operator::FDiv => write!(f, "/."),
+            Operator::IGt => write!(f, ">"),
+            Operator::ILt => write!(f, "<"),
+            Operator::IGe => write!(f, ">="),
+            Operator::ILe => write!(f, "<="),
+            Operator::IEq => write!(f, "=:="),
+            Operator::INe => write!(f, "=\\="),
+            Operator::FGt => write!(f, ">."),
+            Operator::FLt => write!(f, "<."),
+            Operator::FGe => write!(f, ">=."),
+            Operator::FLe => write!(f, "<=."),
+            Operator::FEq => write!(f, "=:=."),
+            Operator::FNe => write!(f, "=\\=."),
+            Operator::GroundEq => write!(f, "=="),
+            Operator::GroundNe => write!(f, "\\="),
+            Operator::UnaryEq => write!(f, "==="),
+            Operator::UnaryNe => write!(f, "\\=="),
+            Operator::HyperlinkFuse => write!(f, "><"),
+            Operator::HyperlinkUnify => write!(f, "<<"),
+        }
     }
 }
 

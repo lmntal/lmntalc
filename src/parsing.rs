@@ -1,9 +1,9 @@
 use std::{cell::Cell, fmt::Display};
 
 use crate::{
-    ast::ASTNode,
+    ast::{ASTNode, AtomName},
     lexing::{LexError, Lexer},
-    token::{Token, TokenKind},
+    token::{Operator, Token, TokenKind},
     util::{SourceCode, Span},
 };
 
@@ -369,12 +369,12 @@ impl<'lex> Parser<'lex> {
     fn parse_relation(&mut self) -> ParseResult {
         let lhs = self.parse_expr(0)?;
         if self.peek().kind.is_relational() {
-            let op = self.peek().kind.clone();
+            let op = self.peek().kind.operator().unwrap();
             let span = self.peek().span;
             self.advance();
             let rhs = self.parse_expr(0)?;
             Ok(ASTNode::Atom {
-                name: op.to_string(),
+                name: op.into(),
                 args: vec![lhs, rhs],
                 span,
             })
@@ -388,10 +388,10 @@ impl<'lex> Parser<'lex> {
         let op = self.peek().kind.clone();
         let span = self.peek().span;
         let mut lhs = match op {
-            TokenKind::IAdd | TokenKind::ISub => {
+            TokenKind::Operator(op) if op == Operator::IAdd || op == Operator::ISub => {
                 let rhs = self.parse_expr(prefix_binding_power(&op))?;
                 ASTNode::Atom {
-                    name: op.to_string(),
+                    name: op.into(),
                     args: vec![rhs],
                     span,
                 }
@@ -411,6 +411,7 @@ impl<'lex> Parser<'lex> {
             if !op.is_arithmetic() {
                 break;
             }
+            let op = op.operator().unwrap();
             let (left_bp, right_bp) = infix_binding_power(&op);
             if left_bp < min_bp {
                 break;
@@ -418,7 +419,7 @@ impl<'lex> Parser<'lex> {
             self.advance();
             let rhs = self.parse_expr(right_bp)?;
             lhs = ASTNode::Atom {
-                name: op.to_string(),
+                name: op.into(),
                 args: vec![lhs, rhs],
                 span,
             }
@@ -515,7 +516,7 @@ impl<'lex> Parser<'lex> {
         let token = self.peek();
         let span = token.span;
         let name = match &token.kind {
-            TokenKind::Identifier(name) | TokenKind::Keyword(name) => {
+            TokenKind::Identifier(name) => {
                 // check if the name starts with a non_uppercase letter
                 if name.starts_with(|c: char| c.is_uppercase()) {
                     return Err(ParseError {
@@ -524,19 +525,23 @@ impl<'lex> Parser<'lex> {
                     });
                 }
                 self.advance();
-                name.clone()
+                AtomName::Plain(name.clone())
+            }
+            TokenKind::Keyword(key) => {
+                self.advance();
+                AtomName::Keyword(key.to_string())
             }
             TokenKind::Char(c) => {
                 self.advance();
-                c.to_string()
+                AtomName::Char(*c)
             }
             TokenKind::Int(i) => {
                 self.advance();
-                i.to_string()
+                AtomName::Int(*i)
             }
             TokenKind::Float(f) => {
                 self.advance();
-                f.to_string()
+                AtomName::Float(*f)
             }
             _ => {
                 return Err(ParseError {
@@ -653,16 +658,16 @@ impl<'lex> Parser<'lex> {
 }
 
 /// Returns the binding power of the prefix operator
-fn prefix_binding_power(op: &TokenKind) -> u8 {
+fn prefix_binding_power(op: &Operator) -> u8 {
     match op {
-        TokenKind::ISub | TokenKind::IAdd | TokenKind::FAdd | TokenKind::FSub => 9,
+        Operator::ISub | Operator::IAdd | Operator::FAdd | Operator::FSub => 9,
         _ => unreachable!(),
     }
 }
 
 /// Returns the binding power of the infix operator
-fn infix_binding_power(op: &TokenKind) -> (u8, u8) {
-    use TokenKind::*;
+fn infix_binding_power(op: &Operator) -> (u8, u8) {
+    use Operator::*;
     match op {
         IMul | IDiv | IMod | FMul | FDiv => (3, 4),
         IAdd | ISub | FAdd | FSub => (1, 2),

@@ -1,8 +1,18 @@
-use std::io;
+use std::{fmt::Display, io};
 
 use termtree::Tree;
 
-use crate::util::Span;
+use crate::{token::Operator, util::Span};
+
+#[derive(Debug, Clone)]
+pub enum AtomName {
+    Plain(String),
+    Keyword(String),
+    Operator(Operator),
+    Int(i64),
+    Float(f64),
+    Char(char),
+}
 
 /// An AST node.
 #[derive(Debug)]
@@ -26,7 +36,7 @@ pub enum ASTNode {
         span: Span,
     },
     Atom {
-        name: String,
+        name: AtomName,
         args: Vec<ASTNode>,
         span: Span,
     },
@@ -39,6 +49,25 @@ pub enum ASTNode {
         name: String,
         span: Span,
     },
+}
+
+impl Display for AtomName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AtomName::Plain(s) => write!(f, "{}", s),
+            AtomName::Keyword(s) => write!(f, "{}", s),
+            AtomName::Operator(op) => write!(f, "{}", op),
+            AtomName::Int(i) => write!(f, "{}", i),
+            AtomName::Float(fl) => write!(f, "{}", fl),
+            AtomName::Char(c) => write!(f, "{}", c),
+        }
+    }
+}
+
+impl From<Operator> for AtomName {
+    fn from(op: Operator) -> Self {
+        AtomName::Operator(op)
+    }
 }
 
 impl ASTNode {

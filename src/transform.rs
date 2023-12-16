@@ -1,32 +1,28 @@
 mod guard;
-mod util;
 
 use crate::{
-    ast::ASTNode,
-    data::{rule::Rule, Atom, Link, Membrane, Process},
+    ast::{ASTNode, AtomName},
+    data::{rule::Rule, *},
+    token::Operator,
 };
 
-use self::{guard::visit_guard, util::name_dispatch};
+use self::guard::visit_guard;
 
-/// Holder means a data structure that can hold processes
-///
-/// Currently, it is implemented by Membrane and Rule
-pub trait ProcessHolder {
-    fn add_atom(&mut self, atom: Atom) -> usize;
-    fn add_link(&mut self, link: Link) -> usize;
-    fn add_membrane(&mut self, membrane: Membrane) -> usize;
+pub trait Storage {
+    fn add_atom(&mut self, atom: Atom) -> AtomId;
+    fn add_membrane(&mut self, membrane: Membrane) -> MembraneId;
+    fn add_rule(&mut self, rule: Rule) -> RuleId;
+    fn add_link(&mut self, link: Link) -> LinkId;
+    fn add_hyperlink(&mut self, hyperlink: HyperLink) -> HyperLinkId;
+    fn get_atom_mut(&mut self, id: AtomId) -> Option<&mut Atom>;
+    fn get_membrane_mut(&mut self, id: MembraneId) -> Option<&mut Membrane>;
 
-    fn get_atom(&self, id: usize) -> &Atom;
-    fn get_membrane(&self, id: usize) -> &Membrane;
-
-    fn get_atom_mut(&mut self, id: usize) -> &mut Atom;
-    fn get_membrane_mut(&mut self, id: usize) -> &mut Membrane;
-
-    fn alpha_connect(&mut self, process: Process, other: Process);
+    fn alpha_connect(&mut self, left: Process, right: Process);
 }
 
 /// Transform LMNtal source code into a membrane (initial membrane)
-pub fn transform_lmntal(ast: &ASTNode) -> Membrane {
+pub fn transform_lmntal(ast: &ASTNode) -> Program {
+    let mut program = Program::default();
     if let ASTNode::Membrane {
         name,
         process_lists,
@@ -34,24 +30,25 @@ pub fn transform_lmntal(ast: &ASTNode) -> Membrane {
         ..
     } = ast
     {
-        let mut mem = Membrane::new(name.clone());
+        let mem = Membrane::new(name.clone(), uuid::Uuid::nil().into());
+        let id = program.add_membrane(mem);
         for process_list in process_lists {
-            let process = visit_process_list(process_list, &mut mem, Process::Membrane(0), 0);
-            mem.add_processes(process);
+            let process = visit_process_list(process_list, &mut program, Process::Membrane(id), id);
+            program.get_membrane_mut(id).unwrap().add_processes(process);
         }
         for rule in rules {
-            let rule = visit_rule(rule, Process::Membrane(0), 0);
-            mem.add_rule(rule);
+            let rule = visit_rule(rule, Process::Membrane(id), id);
+            let rule = program.add_rule(rule);
+            program.get_membrane_mut(id).unwrap().add_rule(rule);
         }
-        mem.solve();
-        mem
     } else {
-        panic!("visit_membrane called with non-membrane node")
+        unreachable!("visit_membrane called with non-membrane node")
     }
+    program
 }
 
 /// Visit a rule node and transform it into a `Rule` struct
-fn visit_rule(node: &ASTNode, from: Process, mem_id: usize) -> Rule {
+fn visit_rule(node: &ASTNode, from: Process, mem_id: MembraneId) -> Rule {
     if let ASTNode::Rule {
         name,
         head,
@@ -104,27 +101,30 @@ fn visit_rule(node: &ASTNode, from: Process, mem_id: usize) -> Rule {
 /// Visit a process list node and transform it into a vector of processes
 fn visit_process_list(
     node: &ASTNode,
-    holder: &mut impl ProcessHolder,
+    store: &mut impl Storage,
     from: Process,
-    mem_id: usize,
+    mem_id: MembraneId,
 ) -> Vec<Process> {
     let mut proc_list = vec![];
     if let ASTNode::ProcessList { processes, .. } = node {
         for process in processes {
-            if let ASTNode::Atom { name, args, .. } = process {
+            if let ASTNode::Atom {
+                name: AtomName::Operator(Operator::Equal),
+                args,
+                ..
+            } = process
+            {
                 // do alpha conversion
-                if name == "=" {
-                    let left = &args[0];
-                    let left = visit_process(left, holder, from, mem_id);
-                    let right = &args[1];
-                    let right = visit_process(right, holder, from, mem_id);
-                    proc_list.push(left);
-                    proc_list.push(right);
-                    holder.alpha_connect(left, right);
-                    continue;
-                }
+                let left = &args[0];
+                let left = visit_process(left, store, from, mem_id);
+                let right = &args[1];
+                let right = visit_process(right, store, from, mem_id);
+                proc_list.push(left);
+                proc_list.push(right);
+                store.alpha_connect(left, right);
+                continue;
             }
-            proc_list.push(visit_process(process, holder, from, mem_id));
+            proc_list.push(visit_process(process, store, from, mem_id));
         }
     } else {
         unreachable!("visit_membrane called with non-process node")
@@ -134,32 +134,32 @@ fn visit_process_list(
 
 fn visit_process(
     node: &ASTNode,
-    holder: &mut impl ProcessHolder,
+    store: &mut impl Storage,
     from: Process,
-    mem_id: usize,
+    mem_id: MembraneId,
 ) -> Process {
     match node {
         ASTNode::Atom { .. } => {
-            let id = visit_atom(node, holder, from, mem_id);
+            let id = visit_atom(node, store, from, mem_id);
             Process::Atom(id)
         }
         ASTNode::Membrane { .. } => {
-            let id = visit_membrane(node, holder, from);
+            let id = visit_membrane(node, store, from, mem_id);
             Process::Membrane(id)
         }
         ASTNode::Link {
             name, hyperlink, ..
         } => {
             if *hyperlink {
-                todo!("hyperlink")
+                unimplemented!("hyperlink")
             } else {
                 let link = Link::new(name);
-                let id = holder.add_link(link);
+                let id = store.add_link(link);
                 Process::Link(id)
             }
         }
         ASTNode::Context { .. } => {
-            todo!("context")
+            unimplemented!("context")
         }
         _ => unreachable!("visit_membrane called with non-process node"),
     }
@@ -170,19 +170,25 @@ fn visit_process(
 /// Returns the index of the atom in the holder
 fn visit_atom(
     node: &ASTNode,
-    holder: &mut impl ProcessHolder,
+    store: &mut impl Storage,
     from: Process,
-    mem_id: usize,
-) -> usize {
+    mem_id: MembraneId,
+) -> AtomId {
     if let ASTNode::Atom { name, args, .. } = node {
-        let (name, data) = name_dispatch(name);
+        let (name, data) = match name {
+            AtomName::Plain(s) | AtomName::Keyword(s) => (s.to_string(), Data::Empty),
+            AtomName::Operator(op) => (op.to_string(), Data::Empty),
+            AtomName::Int(i) => (i.to_string(), Data::Int(*i)),
+            AtomName::Float(f) => (f.to_string(), Data::Float(*f)),
+            AtomName::Char(c) => (c.to_string(), Data::Char(*c)),
+        };
         let atom = Atom {
             parent: mem_id,
             name: name.clone(),
             args: vec![],
             data,
         };
-        let id = holder.add_atom(atom);
+        let id = store.add_atom(atom);
 
         let mut processes = vec![];
 
@@ -191,9 +197,9 @@ fn visit_atom(
         }
 
         for arg in args {
-            processes.push(visit_process(arg, holder, Process::Atom(id), mem_id));
+            processes.push(visit_process(arg, store, Process::Atom(id), mem_id));
         }
-        let atom = holder.get_atom_mut(id);
+        let atom = store.get_atom_mut(id).unwrap();
         atom.args = processes;
         id
     } else {
@@ -204,7 +210,12 @@ fn visit_atom(
 /// Visit a membrane node and add it to the holder
 ///
 /// Returns the index of the membrane in the holder
-fn visit_membrane(node: &ASTNode, holder: &mut impl ProcessHolder, _from: Process) -> usize {
+fn visit_membrane(
+    node: &ASTNode,
+    store: &mut impl Storage,
+    _from: Process,
+    mem_id: MembraneId,
+) -> MembraneId {
     if let ASTNode::Membrane {
         name,
         process_lists,
@@ -212,20 +223,20 @@ fn visit_membrane(node: &ASTNode, holder: &mut impl ProcessHolder, _from: Proces
         ..
     } = node
     {
-        let mem = Membrane::new(name.clone());
-        let proc = holder.add_membrane(mem);
-        let mem = holder.get_membrane_mut(proc);
+        let mem = Membrane::new(name.clone(), mem_id);
+        let proc = store.add_membrane(mem);
         // TODO: proxy links
         for process_list in process_lists {
-            let process = visit_process_list(process_list, mem, Process::Membrane(proc), proc);
-            mem.add_processes(process);
+            let process = visit_process_list(process_list, store, Process::Membrane(proc), proc);
+            store.get_membrane_mut(proc).unwrap().add_processes(process);
         }
         for rule in rules {
             let rule = visit_rule(rule, Process::Membrane(proc), proc);
-            mem.add_rule(rule);
+            let rule = store.add_rule(rule);
+            store.get_membrane_mut(proc).unwrap().add_rule(rule);
         }
         proc
     } else {
-        panic!("visit_membrane called with non-membrane node")
+        unreachable!("visit_membrane called with non-membrane node")
     }
 }

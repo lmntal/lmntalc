@@ -1,13 +1,15 @@
-use std::{collections::HashMap, fmt::Display, str::FromStr};
+use std::{collections::HashMap, fmt::Display};
 
-use super::Process;
+use crate::token::Operator;
+
+use super::{LinkId, Process};
 
 #[derive(Debug, Default)]
 pub struct Guard {
     /// List of conditions
     pub(crate) constraints: Vec<GuardNode>,
     /// Map from variable id to the expression
-    pub(crate) definitions: HashMap<usize, GuardNode>,
+    pub(crate) definitions: HashMap<LinkId, GuardNode>,
 }
 
 impl Guard {
@@ -15,7 +17,7 @@ impl Guard {
         self.constraints.push(node);
     }
 
-    pub(crate) fn add_definition(&mut self, id: usize, node: GuardNode) {
+    pub(crate) fn add_definition(&mut self, id: LinkId, node: GuardNode) {
         self.definitions.insert(id, node);
     }
 }
@@ -76,136 +78,38 @@ impl From<&str> for ProcessConstraint {
     }
 }
 
-#[derive(Debug)]
-pub enum Operator {
-    IntAdd,
-    IntSub,
-    IntMul,
-    IntDiv,
-    IntMod,
-    IntEq,
-    IntNe,
-    IntLt,
-    IntLe,
-    IntGt,
-    IntGe,
-
-    FloatAdd,
-    FloatSub,
-    FloatMul,
-    FloatDiv,
-    FloatEq,
-    FloatNe,
-    FloatLt,
-    FloatLe,
-    FloatGt,
-    FloatGe,
-
-    UnaryEq,
-    UnaryNe,
-    GroundEq,
-    GroundNe,
-}
-
-impl FromStr for Operator {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s {
-            "+" => Operator::IntAdd,
-            "-" => Operator::IntSub,
-            "*" => Operator::IntMul,
-            "/" => Operator::IntDiv,
-            "%" => Operator::IntMod,
-            "=:=" => Operator::IntEq,
-            "=\\=" => Operator::IntNe,
-            "<" => Operator::IntLt,
-            "<=" => Operator::IntLe,
-            ">" => Operator::IntGt,
-            ">=" => Operator::IntGe,
-
-            "+." => Operator::FloatAdd,
-            "-." => Operator::FloatSub,
-            "*." => Operator::FloatMul,
-            "/." => Operator::FloatDiv,
-            "=:=." => Operator::FloatEq,
-            "=\\=." => Operator::FloatNe,
-            "<." => Operator::FloatLt,
-            "<=." => Operator::FloatLe,
-            ">." => Operator::FloatGt,
-            ">=." => Operator::FloatGe,
-
-            "===" => Operator::UnaryEq,
-            "\\==" => Operator::UnaryNe,
-            "==" => Operator::GroundEq,
-            "\\=" => Operator::GroundNe,
-            _ => return Err(()),
-        })
-    }
-}
-
-impl From<&Operator> for String {
-    fn from(value: &Operator) -> Self {
-        String::from(match value {
-            Operator::IntAdd => "+",
-            Operator::IntSub => "-",
-            Operator::IntMul => "*",
-            Operator::IntDiv => "/",
-            Operator::IntMod => "%",
-            Operator::IntEq => "=:=",
-            Operator::IntNe => "=\\=",
-            Operator::IntLt => "<",
-            Operator::IntLe => "<=",
-            Operator::IntGt => ">",
-            Operator::IntGe => ">=",
-
-            Operator::FloatAdd => "+.",
-            Operator::FloatSub => "-.",
-            Operator::FloatMul => "*.",
-            Operator::FloatDiv => "/.",
-            Operator::FloatEq => "=:=.",
-            Operator::FloatNe => "=\\=.",
-            Operator::FloatLt => "<.",
-            Operator::FloatLe => "<=.",
-            Operator::FloatGt => ">.",
-            Operator::FloatGe => ">=.",
-
-            Operator::UnaryEq => "===",
-            Operator::UnaryNe => "\\==",
-            Operator::GroundEq => "==",
-            Operator::GroundNe => "\\=",
-        })
-    }
-}
-
-impl From<&Operator> for ProcessConstraint {
-    fn from(value: &Operator) -> Self {
+impl From<Operator> for ProcessConstraint {
+    fn from(value: Operator) -> Self {
         match value {
-            Operator::IntAdd
-            | Operator::IntSub
-            | Operator::IntMul
-            | Operator::IntDiv
-            | Operator::IntMod
-            | Operator::IntEq
-            | Operator::IntNe
-            | Operator::IntLt
-            | Operator::IntLe
-            | Operator::IntGt
-            | Operator::IntGe => ProcessConstraint::Int,
+            Operator::IAdd
+            | Operator::ISub
+            | Operator::IMul
+            | Operator::IDiv
+            | Operator::IMod
+            | Operator::IEq
+            | Operator::INe
+            | Operator::ILt
+            | Operator::ILe
+            | Operator::IGt
+            | Operator::IGe => ProcessConstraint::Int,
 
-            Operator::FloatAdd
-            | Operator::FloatSub
-            | Operator::FloatMul
-            | Operator::FloatDiv
-            | Operator::FloatEq
-            | Operator::FloatNe
-            | Operator::FloatLt
-            | Operator::FloatLe
-            | Operator::FloatGt
-            | Operator::FloatGe => ProcessConstraint::Float,
+            Operator::FAdd
+            | Operator::FSub
+            | Operator::FMul
+            | Operator::FDiv
+            | Operator::FEq
+            | Operator::FNe
+            | Operator::FLt
+            | Operator::FLe
+            | Operator::FGt
+            | Operator::FGe => ProcessConstraint::Float,
 
             Operator::UnaryEq | Operator::UnaryNe => ProcessConstraint::Unary,
             Operator::GroundEq | Operator::GroundNe => ProcessConstraint::Ground,
+
+            Operator::HyperlinkFuse | Operator::HyperlinkUnify => ProcessConstraint::Hyperlink,
+
+            Operator::Equal => unreachable!(),
         }
     }
 }

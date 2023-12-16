@@ -1,46 +1,45 @@
 use crate::{
-    ast::ASTNode,
+    ast::{ASTNode, AtomName},
     data::{
         guard::{Guard, GuardNode, ProcessConstraint},
         rule::Rule,
         Process,
     },
+    token::Operator,
 };
-
-use super::util::solve_name;
 
 pub(super) fn visit_guard(rule: &mut Rule, process_list: &ASTNode) -> Guard {
     let mut guards = Guard::default();
     if let ASTNode::ProcessList { processes, .. } = process_list {
         for process in processes {
             if let ASTNode::Atom { name, args, .. } = process {
-                match name.as_str() {
+                match name {
                     // assignment
-                    "=" => {
+                    AtomName::Operator(Operator::Equal) => {
                         assert!(args.len() == 2);
                         let lhs = match &args[0] {
-                            ASTNode::Atom { name, .. } => name,
+                            ASTNode::Atom { name, .. } => name.to_string(),
                             _ => unreachable!(),
                         };
                         let rhs = &args[1];
                         let node = transform_guard_expr(rhs, rule);
                         let ty = check_type(&node, rule);
-                        let id = rule.register_def(lhs, ty);
+                        let id = rule.register_def(&lhs, ty);
                         guards.add_definition(id, node);
                     }
                     // comparison
-                    s if is_relation(s) => {
+                    AtomName::Operator(op) if op.is_relational() => {
                         let node = transform_guard_expr(process, rule);
                         _ = check_type(&node, rule);
                         guards.add_constraint(node);
                     }
                     // type constraint
-                    s if is_type_name(s) => {
+                    AtomName::Keyword(s) => {
                         for arg in args {
                             match arg {
                                 ASTNode::Link { name, .. } => {
                                     let link = rule.get_link_by_name_mut(name);
-                                    link.type_ = Some(ProcessConstraint::from(s));
+                                    link.type_ = Some(ProcessConstraint::from(s.as_str()));
                                 }
                                 ASTNode::Context { .. } => unimplemented!(),
                                 _ => unreachable!("illegal guard in rule {}", rule.name),
@@ -63,21 +62,18 @@ pub(super) fn visit_guard(rule: &mut Rule, process_list: &ASTNode) -> Guard {
 
 fn transform_guard_expr(expr: &ASTNode, rule: &mut Rule) -> GuardNode {
     match expr {
-        ASTNode::Atom { name, args, .. } => {
-            let ty = solve_name(name);
-            match ty {
-                super::util::AtomType::Int(i) => GuardNode::Int(i),
-                super::util::AtomType::Float(f) => GuardNode::Float(f),
-                super::util::AtomType::Operator(op) => {
-                    let lhs = &args[0];
-                    let lhs = transform_guard_expr(lhs, rule);
-                    let rhs = &args[1];
-                    let rhs = transform_guard_expr(rhs, rule);
-                    GuardNode::Binary(op, Box::new(lhs), Box::new(rhs))
-                }
-                super::util::AtomType::Char(..) | super::util::AtomType::Plain => unreachable!(),
+        ASTNode::Atom { name, args, .. } => match name {
+            AtomName::Int(i) => GuardNode::Int(*i),
+            AtomName::Float(f) => GuardNode::Float(*f),
+            AtomName::Operator(op) => {
+                let lhs = &args[0];
+                let lhs = transform_guard_expr(lhs, rule);
+                let rhs = &args[1];
+                let rhs = transform_guard_expr(rhs, rule);
+                GuardNode::Binary(*op, Box::new(lhs), Box::new(rhs))
             }
-        }
+            AtomName::Keyword(..) | AtomName::Char(..) | AtomName::Plain(..) => unreachable!(),
+        },
         ASTNode::Link { name, .. } => {
             let link = rule.get_link(name);
             GuardNode::Var(link)
@@ -95,7 +91,7 @@ fn check_type(guard: &GuardNode, rule: &mut Rule) -> ProcessConstraint {
     match guard {
         GuardNode::Binary(op, lhs, rhs) => {
             // propagate type
-            let op = op.into();
+            let op = (*op).into();
             // Must be relational operator or arithmetic operator
             match op {
                 ProcessConstraint::Int | ProcessConstraint::Float => {
@@ -108,9 +104,9 @@ fn check_type(guard: &GuardNode, rule: &mut Rule) -> ProcessConstraint {
                         (GuardNode::Var(l), GuardNode::Var(r)) => {
                             // override previous defined type
                             // TODO: multiple conflicting guard
-                            let l = rule.get_link_by_id_mut(l.get_id());
+                            let l = rule.get_link_by_id_mut(l.get_id().into());
                             l.type_ = Some(op);
-                            let r = rule.get_link_by_id_mut(r.get_id());
+                            let r = rule.get_link_by_id_mut(r.get_id().into());
                             r.type_ = Some(op);
                         }
                         _ => panic!("Unexpected variable type"),
@@ -118,7 +114,7 @@ fn check_type(guard: &GuardNode, rule: &mut Rule) -> ProcessConstraint {
                 }
                 ProcessConstraint::Hyperlink
                 | ProcessConstraint::Unique
-                | ProcessConstraint::String => unreachable!(),
+                | ProcessConstraint::String => unimplemented!(),
             };
 
             op
@@ -137,7 +133,7 @@ fn check_type_or_assign(
     match guard {
         GuardNode::Binary(op, lhs, rhs) => {
             // propagate type
-            let op = op.into();
+            let op = (*op).into();
             _ = check_type_or_assign(lhs, rule, op);
             _ = check_type_or_assign(rhs, rule, op);
             op
@@ -170,12 +166,4 @@ fn check_type_or_assign(
             unreachable!()
         }
     }
-}
-
-fn is_relation(op: &str) -> bool {
-    matches!(op, "!=" | "<" | ">" | "<=" | ">=")
-}
-
-fn is_type_name(name: &str) -> bool {
-    matches!(name, "int" | "float" | "hlink" | "unary" | "ground")
 }

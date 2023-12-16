@@ -1,7 +1,7 @@
 use std::{iter::Peekable, str::Chars};
 
 use crate::{
-    token::{Token, TokenKind, KEYWORD},
+    token::{Operator, Token, TokenKind, KEYWORD},
     util::{SourceCode, Span},
 };
 
@@ -30,6 +30,12 @@ pub struct LexError {
     pub offset: usize,
     pub ty: LexErrorType,
     pub recoverable: Option<(TokenKind, usize)>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LexingResult {
+    pub tokens: Vec<Token>,
+    pub errors: Vec<LexError>,
 }
 
 impl LexError {
@@ -142,14 +148,36 @@ impl<'src> Lexer<'src> {
 
                         Ok(Token::new(span, i64::from_str_radix(&s, 16).unwrap()))
                     }
-                    _ => {
-                        let s = self.take_while(|c| c.is_ascii_digit());
-                        if s.is_empty() {
+                    Some('.') => {
+                        self.next();
+                        let frac = self.take_while(|c| c.is_ascii_digit());
+                        if frac.is_empty() {
+                            // the dot may be end of a process list
+                            self.offset -= 1;
                             return Err(LexError {
                                 offset: self.offset,
                                 ty: LexErrorType::UncompleteNumber,
                                 recoverable: None,
                             });
+                        }
+                        let end = self.offset;
+                        let span = Span::new(start.into(), end.into());
+                        let s = format!("0.{}", frac);
+                        Ok(Token::new(span, s.parse::<f64>().unwrap()))
+                    }
+                    _ => {
+                        if let Some(c) = self.peek() {
+                            if c.is_ascii_alphabetic() {
+                                return Err(LexError {
+                                    offset: self.offset,
+                                    ty: LexErrorType::UncompleteNumber,
+                                    recoverable: None,
+                                });
+                            }
+                        }
+                        let s = self.take_while(|c| c.is_ascii_digit());
+                        if s.is_empty() {
+                            return Ok(Token::new(Span::new(start.into(), self.offset.into()), 0));
                         }
                         let end = self.offset;
                         let span = Span::new(start.into(), end.into());
@@ -258,12 +286,6 @@ impl<'src> Lexer<'src> {
         let span = Span::new(start.into(), end.into());
         Ok(Token::new(span, s))
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct LexingResult {
-    pub tokens: Vec<Token>,
-    pub errors: Vec<LexError>,
 }
 
 impl<'src> Lexer<'src> {
@@ -396,12 +418,12 @@ impl<'src> Lexer<'src> {
                             self.next();
                             Ok(Token::new(
                                 Span::new(start.into(), self.offset.into()),
-                                TokenKind::FAdd,
+                                TokenKind::Operator(Operator::FAdd),
                             ))
                         }
                         _ => Ok(Token::new(
                             Span::new(start.into(), self.offset.into()),
-                            TokenKind::IAdd,
+                            TokenKind::Operator(Operator::IAdd),
                         )),
                     }
                 }
@@ -412,12 +434,12 @@ impl<'src> Lexer<'src> {
                             self.next();
                             Ok(Token::new(
                                 Span::new(start.into(), self.offset.into()),
-                                TokenKind::FSub,
+                                TokenKind::Operator(Operator::FSub),
                             ))
                         }
                         _ => Ok(Token::new(
                             Span::new(start.into(), self.offset.into()),
-                            TokenKind::ISub,
+                            TokenKind::Operator(Operator::ISub),
                         )),
                     }
                 }
@@ -428,12 +450,12 @@ impl<'src> Lexer<'src> {
                             self.next();
                             Ok(Token::new(
                                 Span::new(start.into(), self.offset.into()),
-                                TokenKind::FMul,
+                                TokenKind::Operator(Operator::FMul),
                             ))
                         }
                         _ => Ok(Token::new(
                             Span::new(start.into(), self.offset.into()),
-                            TokenKind::IMul,
+                            TokenKind::Operator(Operator::IMul),
                         )),
                     }
                 }
@@ -444,7 +466,7 @@ impl<'src> Lexer<'src> {
                             self.next();
                             Ok(Token::new(
                                 Span::new(start.into(), self.offset.into()),
-                                TokenKind::FDiv,
+                                TokenKind::Operator(Operator::FDiv),
                             ))
                         }
                         Some('/') => {
@@ -470,7 +492,7 @@ impl<'src> Lexer<'src> {
                         }
                         _ => Ok(Token::new(
                             Span::new(start.into(), self.offset.into()),
-                            TokenKind::IDiv,
+                            TokenKind::Operator(Operator::IDiv),
                         )),
                     }
                 }
@@ -478,7 +500,7 @@ impl<'src> Lexer<'src> {
                     self.next();
                     Ok(Token::new(
                         Span::new(start.into(), self.offset.into()),
-                        TokenKind::IMod,
+                        TokenKind::Operator(Operator::IMod),
                     ))
                 }
                 '>' => {
@@ -488,7 +510,7 @@ impl<'src> Lexer<'src> {
                             self.next();
                             Ok(Token::new(
                                 Span::new(start.into(), self.offset.into()),
-                                TokenKind::FGt,
+                                TokenKind::Operator(Operator::FGt),
                             ))
                         }
                         Some('=') => {
@@ -498,12 +520,12 @@ impl<'src> Lexer<'src> {
                                     self.next();
                                     Ok(Token::new(
                                         Span::new(start.into(), self.offset.into()),
-                                        TokenKind::FGe,
+                                        TokenKind::Operator(Operator::FGe),
                                     ))
                                 }
                                 _ => Ok(Token::new(
                                     Span::new(start.into(), self.offset.into()),
-                                    TokenKind::IGe,
+                                    TokenKind::Operator(Operator::IGe),
                                 )),
                             }
                         }
@@ -513,13 +535,16 @@ impl<'src> Lexer<'src> {
                                 self.next();
                                 Ok(Token::new(
                                     Span::new(start.into(), self.offset.into()),
-                                    TokenKind::HyperlinkFuse,
+                                    TokenKind::Operator(Operator::HyperlinkFuse),
                                 ))
                             } else {
                                 Err(LexError {
                                     offset: self.offset,
                                     ty: LexErrorType::Expected('<'),
-                                    recoverable: Some((TokenKind::HyperlinkUnify, tokens.len())),
+                                    recoverable: Some((
+                                        TokenKind::Operator(Operator::HyperlinkUnify),
+                                        tokens.len(),
+                                    )),
                                 })
                             }
                         }
@@ -527,19 +552,19 @@ impl<'src> Lexer<'src> {
                             self.next();
                             Ok(Token::new(
                                 Span::new(start.into(), self.offset.into()),
-                                TokenKind::HyperlinkFuse,
+                                TokenKind::Operator(Operator::HyperlinkFuse),
                             ))
                         }
                         Some('>') => {
                             self.next();
                             Ok(Token::new(
                                 Span::new(start.into(), self.offset.into()),
-                                TokenKind::HyperlinkUnify,
+                                TokenKind::Operator(Operator::HyperlinkUnify),
                             ))
                         }
                         _ => Ok(Token::new(
                             Span::new(start.into(), self.offset.into()),
-                            TokenKind::IGt,
+                            TokenKind::Operator(Operator::IGt),
                         )),
                     }
                 }
@@ -550,7 +575,7 @@ impl<'src> Lexer<'src> {
                             self.next();
                             Ok(Token::new(
                                 Span::new(start.into(), self.offset.into()),
-                                TokenKind::FLt,
+                                TokenKind::Operator(Operator::FLt),
                             ))
                         }
                         Some('=') => {
@@ -560,12 +585,12 @@ impl<'src> Lexer<'src> {
                                     self.next();
                                     Ok(Token::new(
                                         Span::new(start.into(), self.offset.into()),
-                                        TokenKind::FLe,
+                                        TokenKind::Operator(Operator::FLe),
                                     ))
                                 }
                                 _ => Ok(Token::new(
                                     Span::new(start.into(), self.offset.into()),
-                                    TokenKind::ILe,
+                                    TokenKind::Operator(Operator::ILe),
                                 )),
                             }
                         }
@@ -573,12 +598,12 @@ impl<'src> Lexer<'src> {
                             self.next();
                             Ok(Token::new(
                                 Span::new(start.into(), self.offset.into()),
-                                TokenKind::HyperlinkUnify,
+                                TokenKind::Operator(Operator::HyperlinkUnify),
                             ))
                         }
                         _ => Ok(Token::new(
                             Span::new(start.into(), self.offset.into()),
-                            TokenKind::ILt,
+                            TokenKind::Operator(Operator::ILt),
                         )),
                     }
                 }
@@ -595,19 +620,22 @@ impl<'src> Lexer<'src> {
                                             self.next();
                                             Ok(Token::new(
                                                 Span::new(start.into(), self.offset.into()),
-                                                TokenKind::FEq,
+                                                TokenKind::Operator(Operator::FEq),
                                             ))
                                         }
                                         _ => Ok(Token::new(
                                             Span::new(start.into(), self.offset.into()),
-                                            TokenKind::IEq,
+                                            TokenKind::Operator(Operator::IEq),
                                         )),
                                     }
                                 }
                                 _ => Err(LexError {
                                     offset: self.offset,
                                     ty: LexErrorType::Expected('='),
-                                    recoverable: Some((TokenKind::IEq, tokens.len())),
+                                    recoverable: Some((
+                                        TokenKind::Operator(Operator::IEq),
+                                        tokens.len(),
+                                    )),
                                 }),
                             }
                         }
@@ -621,19 +649,22 @@ impl<'src> Lexer<'src> {
                                             self.next();
                                             Ok(Token::new(
                                                 Span::new(start.into(), self.offset.into()),
-                                                TokenKind::FNe,
+                                                TokenKind::Operator(Operator::FNe),
                                             ))
                                         }
                                         _ => Ok(Token::new(
                                             Span::new(start.into(), self.offset.into()),
-                                            TokenKind::INe,
+                                            TokenKind::Operator(Operator::INe),
                                         )),
                                     }
                                 }
                                 _ => Err(LexError {
                                     offset: self.offset,
                                     ty: LexErrorType::Expected('='),
-                                    recoverable: Some((TokenKind::INe, tokens.len())),
+                                    recoverable: Some((
+                                        TokenKind::Operator(Operator::INe),
+                                        tokens.len(),
+                                    )),
                                 }),
                             }
                         }
@@ -644,18 +675,18 @@ impl<'src> Lexer<'src> {
                                     self.next();
                                     Ok(Token::new(
                                         Span::new(start.into(), self.offset.into()),
-                                        TokenKind::UnaryEq,
+                                        TokenKind::Operator(Operator::UnaryEq),
                                     ))
                                 }
                                 _ => Ok(Token::new(
                                     Span::new(start.into(), self.offset.into()),
-                                    TokenKind::GroundEq,
+                                    TokenKind::Operator(Operator::GroundEq),
                                 )),
                             }
                         }
                         _ => Ok(Token::new(
                             Span::new(start.into(), self.offset.into()),
-                            TokenKind::Equal,
+                            TokenKind::Operator(Operator::Equal),
                         )),
                     }
                 }
@@ -669,12 +700,12 @@ impl<'src> Lexer<'src> {
                                     self.next();
                                     Ok(Token::new(
                                         Span::new(start.into(), self.offset.into()),
-                                        TokenKind::UnaryNe,
+                                        TokenKind::Operator(Operator::UnaryNe),
                                     ))
                                 }
                                 _ => Ok(Token::new(
                                     Span::new(start.into(), self.offset.into()),
-                                    TokenKind::GroundNe,
+                                    TokenKind::Operator(Operator::GroundNe),
                                 )),
                             }
                         }
@@ -713,30 +744,29 @@ impl<'src> Lexer<'src> {
 
 #[test]
 fn test_lexing_number() {
-    let source = SourceCode::phony("0x1234".to_owned());
-    let mut lexer = Lexer::new(&source);
-    assert_eq!(lexer.consume_number().unwrap().kind, TokenKind::Int(0x1234));
-    let source = SourceCode::phony("1234".to_owned());
-    let mut lexer = Lexer::new(&source);
-    assert_eq!(lexer.consume_number().unwrap().kind, TokenKind::Int(1234));
-    let source = SourceCode::phony("1234.5678".to_owned());
-    let mut lexer = Lexer::new(&source);
-    assert_eq!(
-        lexer.consume_number().unwrap().kind,
-        TokenKind::Float(1234.5678)
-    );
-    let source = SourceCode::phony("1234.56".to_owned());
-    let mut lexer = Lexer::new(&source);
-    assert_eq!(
-        lexer.consume_number().unwrap().kind,
-        TokenKind::Float(1234.56)
-    );
-    let source = SourceCode::phony("0x".to_owned());
-    let mut lexer = Lexer::new(&source);
-    assert!(lexer.consume_number().is_err());
-    let source = SourceCode::phony("0x1234".to_owned());
-    let mut lexer = Lexer::new(&source);
-    assert_eq!(lexer.consume_number().unwrap().kind, TokenKind::Int(0x1234));
+    macro_rules! test_number {
+        ($src:expr, $kind:expr) => {
+            let source = SourceCode::phony($src.to_owned());
+            let mut lexer = Lexer::new(&source);
+            assert_eq!(lexer.consume_number().unwrap().kind, $kind);
+        };
+    }
+
+    macro_rules! wrong {
+        ($src:expr) => {
+            let source = SourceCode::phony($src.to_owned());
+            let mut lexer = Lexer::new(&source);
+            assert!(lexer.consume_number().is_err());
+        };
+    }
+
+    test_number!("0".to_owned(), TokenKind::Int(0));
+    test_number!("0x1234".to_owned(), TokenKind::Int(0x1234));
+    test_number!("1234".to_owned(), TokenKind::Int(1234));
+    test_number!("1234.5678".to_owned(), TokenKind::Float(1234.5678));
+
+    wrong!("0x");
+    wrong!("0.");
 }
 
 #[test]
@@ -762,10 +792,10 @@ fn test_lexing_operator() {
     assert_eq!(result.errors.len(), 0);
     assert_eq!(result.tokens.len(), 7);
     assert_eq!(result.tokens[0].kind, TokenKind::Char('a'));
-    assert_eq!(result.tokens[1].kind, TokenKind::IAdd);
+    assert_eq!(result.tokens[1].kind, TokenKind::Operator(Operator::IAdd));
     assert_eq!(result.tokens[2].kind, TokenKind::Identifier("b".to_owned()));
-    assert_eq!(result.tokens[3].kind, TokenKind::FMul);
+    assert_eq!(result.tokens[3].kind, TokenKind::Operator(Operator::FMul));
     assert_eq!(result.tokens[4].kind, TokenKind::Identifier("c".to_owned()));
-    assert_eq!(result.tokens[5].kind, TokenKind::IEq);
+    assert_eq!(result.tokens[5].kind, TokenKind::Operator(Operator::IEq));
     assert_eq!(result.tokens[6].kind, TokenKind::Identifier("d".to_owned()));
 }
