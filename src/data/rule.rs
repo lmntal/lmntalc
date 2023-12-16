@@ -4,8 +4,10 @@ use crate::transform::Storage;
 
 use super::{
     guard::{Guard, ProcessConstraint},
-    Atom, AtomId, HyperLinkId, Link, LinkId, Membrane, MembraneId, Process,
+    Atom, Link, Membrane, Process,
 };
+
+use super::id::*;
 
 #[derive(Debug, Default)]
 pub struct Rule {
@@ -24,14 +26,16 @@ pub struct Rule {
 
     pattern_parsed: bool,
 
-    pattern_atom_store: HashMap<LinkId, Atom>,
-    pattern_membrane_store: HashMap<LinkId, Membrane>,
+    pattern_atom_store: HashMap<AtomId, Atom>,
+    pattern_membrane_store: HashMap<MembraneId, Membrane>,
 
     link_store: HashMap<LinkId, RuleLink>,
     hyper_link_store: HashMap<HyperLinkId, super::HyperLink>,
 
-    body_atom_store: HashMap<LinkId, Atom>,
-    body_membrane_store: HashMap<LinkId, Membrane>,
+    body_atom_store: HashMap<AtomId, Atom>,
+    body_membrane_store: HashMap<MembraneId, Membrane>,
+
+    id_generator: IdGenerator,
 }
 
 /// Argument of a link in a rule
@@ -81,35 +85,32 @@ pub enum RuleLinkStatus {
 }
 
 impl Storage for Rule {
-    fn add_atom(&mut self, atom: Atom) -> AtomId {
+    fn add_atom(&mut self, atom: Atom, parent: MembraneId) -> AtomId {
+        let id = self.id_generator.next_atom_id(parent);
         if self.pattern_parsed {
-            let id = uuid::Uuid::new_v4();
-            self.body_atom_store.insert(LinkId(id), atom);
-            AtomId(id)
+            self.body_atom_store.insert(id, atom);
         } else {
-            let id = uuid::Uuid::new_v4();
-            self.pattern_atom_store.insert(LinkId(id), atom);
-            AtomId(id)
+            self.pattern_atom_store.insert(id, atom);
         }
+        id
     }
 
-    fn add_membrane(&mut self, membrane: Membrane) -> MembraneId {
+    fn add_membrane(&mut self, membrane: Membrane, parent: MembraneId) -> MembraneId {
+        let id = self.id_generator.next_membrane_id(parent);
         if self.pattern_parsed {
-            let id = uuid::Uuid::new_v4();
-            self.body_membrane_store.insert(LinkId(id), membrane);
-            MembraneId(id)
+            self.body_membrane_store.insert(id, membrane);
         } else {
-            let id = uuid::Uuid::new_v4();
-            self.pattern_membrane_store.insert(LinkId(id), membrane);
-            MembraneId(id)
+            self.pattern_membrane_store.insert(id, membrane);
         }
+        id
     }
 
-    fn add_rule(&mut self, rule: Rule) -> super::RuleId {
+    #[allow(unused_variables)]
+    fn add_rule(&mut self, rule: Rule, parent: MembraneId) -> super::RuleId {
         unimplemented!("Generating rules in rules is not supported")
     }
 
-    fn add_link(&mut self, link: Link) -> LinkId {
+    fn add_link(&mut self, link: Link, parent: MembraneId) -> LinkId {
         if self.pattern_parsed {
             for (id, link_) in &mut self.link_store {
                 if link_.name == link.name {
@@ -120,7 +121,7 @@ impl Storage for Rule {
                 }
             }
 
-            let id = LinkId(uuid::Uuid::new_v4());
+            let id = self.id_generator.next_link_id(parent);
             let link = RuleLink::from(link);
             self.link_store.insert(id, link);
             id
@@ -131,38 +132,42 @@ impl Storage for Rule {
                 }
             }
 
-            let id = LinkId(uuid::Uuid::new_v4());
+            let id = self.id_generator.next_link_id(parent);
             let link = RuleLink::from(link);
             self.link_store.insert(id, link);
             id
         }
     }
 
-    fn add_hyperlink(&mut self, hyperlink: super::HyperLink) -> super::HyperLinkId {
+    fn add_hyperlink(
+        &mut self,
+        hyperlink: super::HyperLink,
+        parent: MembraneId,
+    ) -> super::HyperLinkId {
         for (id, link_) in &mut self.hyper_link_store {
             if link_.name == hyperlink.name {
                 return *id;
             }
         }
 
-        let id = super::HyperLinkId(uuid::Uuid::new_v4());
+        let id = self.id_generator.next_hyperlink_id(parent);
         self.hyper_link_store.insert(id, hyperlink);
         id
     }
 
     fn get_atom_mut(&mut self, id: AtomId) -> Option<&mut Atom> {
         if self.pattern_parsed {
-            self.body_atom_store.get_mut(&LinkId(id.0))
+            self.body_atom_store.get_mut(&id)
         } else {
-            self.pattern_atom_store.get_mut(&LinkId(id.0))
+            self.pattern_atom_store.get_mut(&id)
         }
     }
 
     fn get_membrane_mut(&mut self, id: MembraneId) -> Option<&mut Membrane> {
         if self.pattern_parsed {
-            self.body_membrane_store.get_mut(&LinkId(id.0))
+            self.body_membrane_store.get_mut(&id)
         } else {
-            self.pattern_membrane_store.get_mut(&LinkId(id.0))
+            self.pattern_membrane_store.get_mut(&id)
         }
     }
 
@@ -171,53 +176,49 @@ impl Storage for Rule {
             (Process::Atom(atom1), Process::Atom(atom2)) => {
                 if self.pattern_parsed {
                     self.body_atom_store
-                        .get_mut(&LinkId(atom1.0))
+                        .get_mut(&atom1)
                         .unwrap()
                         .args
                         .push(right);
                     self.body_atom_store
-                        .get_mut(&LinkId(atom2.0))
+                        .get_mut(&atom2)
                         .unwrap()
                         .args
                         .push(left);
                 } else {
                     self.pattern_atom_store
-                        .get_mut(&LinkId(atom1.0))
+                        .get_mut(&atom1)
                         .unwrap()
                         .args
                         .push(right);
                     self.pattern_atom_store
-                        .get_mut(&LinkId(atom2.0))
+                        .get_mut(&atom2)
                         .unwrap()
                         .args
                         .push(left);
                 }
             }
-            (Process::Atom(atom), Process::Link(link)) => {
+            (Process::Atom(atom), Process::Link(_)) => {
                 if self.pattern_parsed {
                     self.body_atom_store
-                        .get_mut(&LinkId(atom.0))
+                        .get_mut(&atom)
                         .unwrap()
                         .args
                         .push(right);
                 } else {
                     self.pattern_atom_store
-                        .get_mut(&LinkId(atom.0))
+                        .get_mut(&atom)
                         .unwrap()
                         .args
                         .push(right);
                 }
             }
-            (Process::Link(link), Process::Atom(atom)) => {
+            (Process::Link(_), Process::Atom(atom)) => {
                 if self.pattern_parsed {
-                    self.body_atom_store
-                        .get_mut(&LinkId(atom.0))
-                        .unwrap()
-                        .args
-                        .push(left);
+                    self.body_atom_store.get_mut(&atom).unwrap().args.push(left);
                 } else {
                     self.pattern_atom_store
-                        .get_mut(&LinkId(atom.0))
+                        .get_mut(&atom)
                         .unwrap()
                         .args
                         .push(left);
@@ -316,7 +317,7 @@ impl Rule {
     }
 
     pub(crate) fn get_link_by_name_mut(&mut self, as_str: &str) -> &mut RuleLink {
-        for (id, link) in &mut self.link_store {
+        for link in &mut self.link_store.values_mut() {
             if link.name == as_str {
                 return link;
             }
@@ -332,12 +333,12 @@ impl Rule {
     ///
     /// Return `None` if the definition is already registered or the name is invalid
     pub(crate) fn register_def(&mut self, as_str: &str, ty: ProcessConstraint) -> LinkId {
-        for (id, link) in &self.link_store {
+        for link in self.link_store.values() {
             if link.name == as_str {
                 panic!("link {} already defined", as_str);
             }
         }
-        let id = LinkId(uuid::Uuid::new_v4());
+        let id = self.id_generator.next_link_id(self.parent);
         let mut link = RuleLink::def(as_str.to_string());
         link.type_ = Some(ty);
         self.link_store.insert(id, link);

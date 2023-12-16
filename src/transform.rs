@@ -7,13 +7,15 @@ use crate::{
 };
 
 use self::guard::visit_guard;
+use super::data::id::*;
 
 pub trait Storage {
-    fn add_atom(&mut self, atom: Atom) -> AtomId;
-    fn add_membrane(&mut self, membrane: Membrane) -> MembraneId;
-    fn add_rule(&mut self, rule: Rule) -> RuleId;
-    fn add_link(&mut self, link: Link) -> LinkId;
-    fn add_hyperlink(&mut self, hyperlink: HyperLink) -> HyperLinkId;
+    fn add_atom(&mut self, atom: Atom, parent: MembraneId) -> AtomId;
+    fn add_membrane(&mut self, membrane: Membrane, parent: MembraneId) -> MembraneId;
+    fn add_rule(&mut self, rule: Rule, parent: MembraneId) -> RuleId;
+    fn add_link(&mut self, link: Link, parent: MembraneId) -> LinkId;
+    fn add_hyperlink(&mut self, hyperlink: HyperLink, parent: MembraneId) -> HyperLinkId;
+
     fn get_atom_mut(&mut self, id: AtomId) -> Option<&mut Atom>;
     fn get_membrane_mut(&mut self, id: MembraneId) -> Option<&mut Membrane>;
 
@@ -30,16 +32,23 @@ pub fn transform_lmntal(ast: &ASTNode) -> Program {
         ..
     } = ast
     {
-        let mem = Membrane::new(name.clone(), uuid::Uuid::nil().into());
-        let id = program.add_membrane(mem);
+        // root means void, since the "root membrane" has no parent
+        let void = MembraneId::root();
+        let mem = Membrane::new(name.clone(), void);
+        let root = program.add_membrane(mem, void);
+        program.set_root(root);
         for process_list in process_lists {
-            let process = visit_process_list(process_list, &mut program, Process::Membrane(id), id);
-            program.get_membrane_mut(id).unwrap().add_processes(process);
+            let process =
+                visit_process_list(process_list, &mut program, Process::Membrane(root), root);
+            program
+                .get_membrane_mut(root)
+                .unwrap()
+                .add_processes(process);
         }
         for rule in rules {
-            let rule = visit_rule(rule, Process::Membrane(id), id);
-            let rule = program.add_rule(rule);
-            program.get_membrane_mut(id).unwrap().add_rule(rule);
+            let rule = visit_rule(rule, Process::Membrane(root), root);
+            let rule = program.add_rule(rule, root);
+            program.get_membrane_mut(root).unwrap().add_rule(rule);
         }
     } else {
         unreachable!("visit_membrane called with non-membrane node")
@@ -154,7 +163,7 @@ fn visit_process(
                 unimplemented!("hyperlink")
             } else {
                 let link = Link::new(name);
-                let id = store.add_link(link);
+                let id = store.add_link(link, mem_id);
                 Process::Link(id)
             }
         }
@@ -188,7 +197,7 @@ fn visit_atom(
             args: vec![],
             data,
         };
-        let id = store.add_atom(atom);
+        let id = store.add_atom(atom, mem_id);
 
         let mut processes = vec![];
 
@@ -224,7 +233,7 @@ fn visit_membrane(
     } = node
     {
         let mem = Membrane::new(name.clone(), mem_id);
-        let proc = store.add_membrane(mem);
+        let proc = store.add_membrane(mem, mem_id);
         // TODO: proxy links
         for process_list in process_lists {
             let process = visit_process_list(process_list, store, Process::Membrane(proc), proc);
@@ -232,7 +241,7 @@ fn visit_membrane(
         }
         for rule in rules {
             let rule = visit_rule(rule, Process::Membrane(proc), proc);
-            let rule = store.add_rule(rule);
+            let rule = store.add_rule(rule, mem_id);
             store.get_membrane_mut(proc).unwrap().add_rule(rule);
         }
         proc

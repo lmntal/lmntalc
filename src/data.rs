@@ -1,4 +1,5 @@
 pub mod guard;
+pub mod id;
 pub mod rule;
 
 use std::{
@@ -11,48 +12,24 @@ use crate::transform::Storage;
 
 use self::rule::Rule;
 
-macro_rules! ids {
-    (
-        $(
-            $name:ident
-        ),*
-    ) => {
-        $(
-            #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
-            pub struct $name(uuid::Uuid);
-
-            impl From<uuid::Uuid> for $name {
-                fn from(id: uuid::Uuid) -> Self {
-                    Self(id)
-                }
-            }
-
-            impl From<$name> for uuid::Uuid {
-                fn from(id: $name) -> Self {
-                    id.0
-                }
-            }
-        )*
-    };
-}
-
-ids! {
-    RuleId,
-    MembraneId,
-    AtomId,
-    LinkId,
-    HyperLinkId
-}
+use id::*;
 
 #[derive(Debug, Default)]
 pub struct Program {
     root: MembraneId,
 
-    rules: HashMap<uuid::Uuid, Rule>,
-    membranes: HashMap<uuid::Uuid, Membrane>,
-    atoms: HashMap<uuid::Uuid, Atom>,
-    links: HashMap<uuid::Uuid, Link>,
-    hyperlinks: HashMap<uuid::Uuid, HyperLink>,
+    rules: HashMap<RuleId, Rule>,
+    membranes: HashMap<MembraneId, Membrane>,
+    atoms: HashMap<AtomId, Atom>,
+    links: HashMap<LinkId, Link>,
+    hyperlinks: HashMap<HyperLinkId, HyperLink>,
+
+    id_generator: IdGenerator,
+}
+impl Program {
+    pub(crate) fn set_root(&mut self, root: MembraneId) {
+        self.root = root;
+    }
 }
 
 #[derive(Debug, Clone, Copy, Eq)]
@@ -73,6 +50,7 @@ pub enum Process {
     Hyperlink(HyperLinkId),
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 pub struct Membrane {
     parent: MembraneId,
@@ -117,55 +95,55 @@ pub enum Data {
 }
 
 impl Storage for Program {
-    fn add_atom(&mut self, atom: Atom) -> AtomId {
-        let id = uuid::Uuid::new_v4();
+    fn add_atom(&mut self, atom: Atom, parent: MembraneId) -> AtomId {
+        let id = self.id_generator.next_atom_id(parent);
         self.atoms.insert(id, atom);
-        AtomId(id)
+        id
     }
 
-    fn add_membrane(&mut self, membrane: Membrane) -> MembraneId {
-        let id = uuid::Uuid::new_v4();
+    fn add_membrane(&mut self, membrane: Membrane, parent: MembraneId) -> MembraneId {
+        let id = self.id_generator.next_membrane_id(parent);
         self.membranes.insert(id, membrane);
-        MembraneId(id)
+        id
     }
 
-    fn add_rule(&mut self, rule: Rule) -> RuleId {
-        let id = uuid::Uuid::new_v4();
+    fn add_rule(&mut self, rule: Rule, parent: MembraneId) -> RuleId {
+        let id = self.id_generator.next_rule_id(parent);
         self.rules.insert(id, rule);
-        RuleId(id)
+        id
     }
 
-    fn add_link(&mut self, link: Link) -> LinkId {
-        let id = uuid::Uuid::new_v4();
+    fn add_link(&mut self, link: Link, parent: MembraneId) -> LinkId {
+        let id = self.id_generator.next_link_id(parent);
         self.links.insert(id, link);
-        LinkId(id)
+        id
     }
 
-    fn add_hyperlink(&mut self, hyperlink: HyperLink) -> HyperLinkId {
-        let id = uuid::Uuid::new_v4();
+    fn add_hyperlink(&mut self, hyperlink: HyperLink, parent: MembraneId) -> HyperLinkId {
+        let id = self.id_generator.next_hyperlink_id(parent);
         self.hyperlinks.insert(id, hyperlink);
-        HyperLinkId(id)
+        id
     }
 
     fn get_atom_mut(&mut self, id: AtomId) -> Option<&mut Atom> {
-        self.atoms.get_mut(&id.0)
+        self.atoms.get_mut(&id)
     }
 
     fn get_membrane_mut(&mut self, id: MembraneId) -> Option<&mut Membrane> {
-        self.membranes.get_mut(&id.0)
+        self.membranes.get_mut(&id)
     }
 
     fn alpha_connect(&mut self, left: Process, right: Process) {
         match (left, right) {
             (Process::Atom(id), Process::Atom(other_id)) => {
-                self.atoms.get_mut(&id.0).unwrap().args.push(right);
-                self.atoms.get_mut(&other_id.0).unwrap().args.push(left);
+                self.atoms.get_mut(&id).unwrap().args.push(right);
+                self.atoms.get_mut(&other_id).unwrap().args.push(left);
             }
-            (Process::Atom(atom), Process::Link(link)) => {
-                self.atoms.get_mut(&atom.0).unwrap().args.push(right);
+            (Process::Atom(atom), Process::Link(_)) => {
+                self.atoms.get_mut(&atom).unwrap().args.push(right);
             }
-            (Process::Link(link), Process::Atom(atom)) => {
-                self.atoms.get_mut(&atom.0).unwrap().args.push(left);
+            (Process::Link(_), Process::Atom(atom)) => {
+                self.atoms.get_mut(&atom).unwrap().args.push(left);
             }
             _ => unimplemented!(),
         }
@@ -225,12 +203,12 @@ impl Hash for Process {
 }
 
 impl Process {
-    pub fn get_id(&self) -> uuid::Uuid {
+    pub fn get_id(&self) -> u64 {
         match self {
-            Self::Atom(id) => id.0,
-            Self::Membrane(id) => id.0,
-            Self::Link(id) => id.0,
-            Self::Hyperlink(id) => id.0,
+            Self::Atom(id) => (*id).into(),
+            Self::Membrane(id) => (*id).into(),
+            Self::Link(id) => (*id).into(),
+            Self::Hyperlink(id) => (*id).into(),
         }
     }
 }
