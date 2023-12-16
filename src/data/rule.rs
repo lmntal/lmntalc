@@ -287,6 +287,26 @@ impl RuleLink {
             (RuleLinkArg::Temp(_), RuleLinkArg::Body(_, _)) => RuleLinkStatus::Guarded, // Asserted to be guarded
         }
     }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn arg1(&self) -> RuleLinkArg {
+        self.arg1
+    }
+
+    pub fn arg2(&self) -> RuleLinkArg {
+        self.arg2
+    }
+
+    pub fn is_linked_in_body(&self) -> bool {
+        self.linked_in_body
+    }
+
+    pub fn get_type(&self) -> Option<ProcessConstraint> {
+        self.type_
+    }
 }
 
 impl From<Link> for RuleLink {
@@ -303,7 +323,7 @@ impl From<Link> for RuleLink {
 }
 
 impl Rule {
-    pub fn set_pattern_parsed(&mut self) {
+    pub(crate) fn set_pattern_parsed(&mut self) {
         self.pattern_parsed = true;
     }
 
@@ -343,5 +363,53 @@ impl Rule {
         link.type_ = Some(ty);
         self.link_store.insert(id, link);
         id
+    }
+
+    pub fn pattern_atoms(&self) -> &HashMap<AtomId, Atom> {
+        &self.pattern_atom_store
+    }
+
+    pub fn pattern_atoms_mut(&mut self) -> &mut HashMap<AtomId, Atom> {
+        &mut self.pattern_atom_store
+    }
+
+    pub fn pattern_membranes(&self) -> &HashMap<MembraneId, Membrane> {
+        &self.pattern_membrane_store
+    }
+
+    pub fn pattern_membranes_mut(&mut self) -> &mut HashMap<MembraneId, Membrane> {
+        &mut self.pattern_membrane_store
+    }
+
+    pub fn body_atoms(&self) -> &HashMap<AtomId, Atom> {
+        &self.body_atom_store
+    }
+
+    pub fn body_atoms_mut(&mut self) -> &mut HashMap<AtomId, Atom> {
+        &mut self.body_atom_store
+    }
+
+    pub fn body_membranes(&self) -> &HashMap<MembraneId, Membrane> {
+        &self.body_membrane_store
+    }
+
+    pub fn body_membranes_mut(&mut self) -> &mut HashMap<MembraneId, Membrane> {
+        &mut self.body_membrane_store
+    }
+
+    pub fn links(&self) -> &HashMap<LinkId, RuleLink> {
+        &self.link_store
+    }
+
+    pub fn links_mut(&mut self) -> &mut HashMap<LinkId, RuleLink> {
+        &mut self.link_store
+    }
+
+    pub fn hyper_links(&self) -> &HashMap<HyperLinkId, super::HyperLink> {
+        &self.hyper_link_store
+    }
+
+    pub fn hyper_links_mut(&mut self) -> &mut HashMap<HyperLinkId, super::HyperLink> {
+        &mut self.hyper_link_store
     }
 }

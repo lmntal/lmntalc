@@ -7,9 +7,9 @@ use super::{LinkId, Process};
 #[derive(Debug, Default)]
 pub struct Guard {
     /// List of conditions
-    pub(crate) constraints: Vec<GuardNode>,
+    pub constraints: Vec<GuardNode>,
     /// Map from variable id to the expression
-    pub(crate) definitions: HashMap<LinkId, GuardNode>,
+    pub definitions: HashMap<LinkId, GuardNode>,
 }
 
 impl Guard {

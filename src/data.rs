@@ -26,9 +26,54 @@ pub struct Program {
 
     id_generator: IdGenerator,
 }
+
 impl Program {
     pub(crate) fn set_root(&mut self, root: MembraneId) {
         self.root = root;
+    }
+
+    pub fn root(&self) -> MembraneId {
+        self.root
+    }
+
+    pub fn atoms(&self) -> &HashMap<AtomId, Atom> {
+        &self.atoms
+    }
+
+    pub fn atoms_mut(&mut self) -> &mut HashMap<AtomId, Atom> {
+        &mut self.atoms
+    }
+
+    pub fn membranes(&self) -> &HashMap<MembraneId, Membrane> {
+        &self.membranes
+    }
+
+    pub fn membranes_mut(&mut self) -> &mut HashMap<MembraneId, Membrane> {
+        &mut self.membranes
+    }
+
+    pub fn links(&self) -> &HashMap<LinkId, Link> {
+        &self.links
+    }
+
+    pub fn links_mut(&mut self) -> &mut HashMap<LinkId, Link> {
+        &mut self.links
+    }
+
+    pub fn hyperlinks(&self) -> &HashMap<HyperLinkId, HyperLink> {
+        &self.hyperlinks
+    }
+
+    pub fn hyperlinks_mut(&mut self) -> &mut HashMap<HyperLinkId, HyperLink> {
+        &mut self.hyperlinks
+    }
+
+    pub fn rules(&self) -> &HashMap<RuleId, Rule> {
+        &self.rules
+    }
+
+    pub fn rules_mut(&mut self) -> &mut HashMap<RuleId, Rule> {
+        &mut self.rules
     }
 }
 
@@ -46,7 +91,17 @@ pub enum Process {
     ///
     /// The second usize is the id of the membrane
     Membrane(MembraneId),
+    /// A link in a membrane
+    ///
+    /// The first usize is the id of the parent membrane
+    ///
+    /// The second usize is the id of the link
     Link(LinkId),
+    /// A hyperlink in a membrane
+    ///
+    /// The first usize is the id of the parent membrane
+    ///
+    /// The second usize is the id of the hyperlink
     Hyperlink(HyperLinkId),
 }
 
