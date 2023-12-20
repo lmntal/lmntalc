@@ -163,9 +163,9 @@ fn visit_process_list(
             {
                 // do alpha conversion
                 let left = &args[0];
-                let left = visit_process(left, store, Process::Atom(0.into()), mem_id);
+                let left = visit_process(left, store, Process::Atom(u64::MAX.into()), mem_id);
                 let right = &args[1];
-                let right = visit_process(right, store, Process::Atom(0.into()), mem_id);
+                let right = visit_process(right, store, Process::Atom(u64::MAX.into()), mem_id);
                 proc_list.push(left);
                 proc_list.push(right);
                 store.alpha_connect(left, right);
@@ -245,8 +245,10 @@ fn visit_atom(
 
         let mut processes = vec![];
 
-        if let Process::Atom(..) = from {
-            processes.push(from);
+        if let Process::Atom(id) = from {
+            if id != u64::MAX.into() {
+                processes.push(from);
+            }
         }
 
         for arg in args {
