@@ -1,1 +1,9 @@
 /target
+
+.vscode/
+.idea/
+
+*.lmn
+
+!examples/**
+!benchmarks/**
