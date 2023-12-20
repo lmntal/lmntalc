@@ -1,5 +1,3 @@
-use std::{iter::Peekable, str::Chars};
-
 use crate::{
     token::{Operator, Token, TokenKind, KEYWORD},
     util::{SourceCode, Span},
@@ -7,8 +5,8 @@ use crate::{
 
 /// A lexer for LMNtal.
 #[derive(Debug, Clone)]
-pub struct Lexer<'src> {
-    src: Peekable<Chars<'src>>,
+pub struct Lexer {
+    src: Vec<char>,
     offset: usize,
 }
 
@@ -88,21 +86,34 @@ impl LexError {
 }
 
 // Basic lexer functions
-impl<'src> Lexer<'src> {
-    pub fn new(src: &'src SourceCode) -> Self {
+impl Lexer {
+    pub fn new(src: &SourceCode) -> Self {
         Self {
-            src: src.source().chars().peekable(),
+            src: src.source().chars().collect(),
             offset: 0,
         }
     }
 
     fn next(&mut self) -> Option<char> {
-        self.offset += 1;
-        self.src.next()
+        if self.offset >= self.src.len() {
+            None
+        } else {
+            let c = self.src[self.offset];
+            self.offset += 1;
+            Some(c)
+        }
     }
 
     fn peek(&mut self) -> Option<char> {
-        self.src.peek().cloned()
+        if self.offset >= self.src.len() {
+            None
+        } else {
+            Some(self.src[self.offset])
+        }
+    }
+
+    fn rewind(&mut self, n: usize) {
+        self.offset -= n;
     }
 
     fn take_while<F>(&mut self, mut f: F) -> String
@@ -123,7 +134,7 @@ impl<'src> Lexer<'src> {
 type LexResult = Result<Token, LexError>;
 
 // Atoms
-impl<'src> Lexer<'src> {
+impl Lexer {
     fn consume_number(&mut self) -> LexResult {
         // hex: 0x[0-9a-fA-F]+
         // dec: [0-9]+
@@ -153,12 +164,8 @@ impl<'src> Lexer<'src> {
                         let frac = self.take_while(|c| c.is_ascii_digit());
                         if frac.is_empty() {
                             // the dot may be end of a process list
-                            self.offset -= 1;
-                            return Err(LexError {
-                                offset: self.offset,
-                                ty: LexErrorType::UncompleteNumber,
-                                recoverable: None,
-                            });
+                            self.rewind(1); // rewind the dot
+                            return Ok(Token::new(Span::new(start.into(), self.offset.into()), 0));
                         }
                         let end = self.offset;
                         let span = Span::new(start.into(), end.into());
@@ -200,7 +207,9 @@ impl<'src> Lexer<'src> {
                     let end = self.offset;
                     let span = Span::new(start.into(), end.into());
                     if frac.is_empty() {
-                        // treat as integer and remain the dot
+                        self.rewind(1);
+                        let end = self.offset;
+                        let span = Span::new(start.into(), end.into());
                         Ok(Token::new(span, s.parse::<i64>().unwrap()))
                     } else {
                         let s = format!("{}.{}", s, frac);
@@ -288,7 +297,7 @@ impl<'src> Lexer<'src> {
     }
 }
 
-impl<'src> Lexer<'src> {
+impl Lexer {
     pub fn lex(&mut self) -> LexingResult {
         let mut tokens = Vec::new();
         let mut errors = Vec::new();
