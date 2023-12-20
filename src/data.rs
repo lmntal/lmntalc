@@ -36,9 +36,12 @@ impl Program {
         self.root
     }
 
-    pub fn atoms(&self, membrane: MembraneId) -> Vec<Atom> {
-        self.membranes.get(&membrane).map_or(vec![], |mem| {
-            mem.atoms.iter().map(|id| self.atoms[id].clone()).collect()
+    pub fn atoms(&self, membrane: MembraneId) -> HashMap<AtomId, Atom> {
+        self.membranes.get(&membrane).map_or(HashMap::new(), |mem| {
+            mem.atoms
+                .iter()
+                .map(|id| (*id, self.atoms[id].clone()))
+                .collect()
         })
     }
 
@@ -46,17 +49,20 @@ impl Program {
         &self.membranes
     }
 
-    pub fn links(&self, membrane: MembraneId) -> Vec<Link> {
-        self.membranes.get(&membrane).map_or(vec![], |mem| {
-            mem.links.iter().map(|id| self.links[id].clone()).collect()
+    pub fn links(&self, membrane: MembraneId) -> HashMap<LinkId, Link> {
+        self.membranes.get(&membrane).map_or(HashMap::new(), |mem| {
+            mem.links
+                .iter()
+                .map(|id| (*id, self.links[id].clone()))
+                .collect()
         })
     }
 
-    pub fn hyperlinks(&self, membrane: MembraneId) -> Vec<HyperLink> {
-        self.membranes.get(&membrane).map_or(vec![], |mem| {
+    pub fn hyperlinks(&self, membrane: MembraneId) -> HashMap<HyperLinkId, HyperLink> {
+        self.membranes.get(&membrane).map_or(HashMap::new(), |mem| {
             mem.hyperlinks
                 .iter()
-                .map(|id| self.hyperlinks[id].clone())
+                .map(|id| (*id, self.hyperlinks[id].clone()))
                 .collect()
         })
     }
