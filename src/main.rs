@@ -1,5 +1,3 @@
-mod report;
-
 use std::{io, path::PathBuf};
 
 use clap::Parser;
@@ -7,9 +5,9 @@ use lmntalc::{
     analyzer::analyze,
     ast::tree,
     parsing::{self},
+    report::Reporter,
     util::SourceCode,
 };
-use report::Reporter;
 
 #[derive(Parser)]
 #[command(name = "LMNtal Compiler")]

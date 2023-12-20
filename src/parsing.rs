@@ -11,6 +11,7 @@ use crate::{
 #[derive(Debug)]
 pub struct Parser<'lex> {
     source: &'lex SourceCode,
+    warnings: Vec<ParseWarning>,
     tokens: Vec<Token>,
     pos: Cell<usize>,
 }
@@ -29,6 +30,17 @@ pub enum ParseErrorType {
 #[derive(Debug)]
 pub struct ParseError {
     pub ty: ParseErrorType,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ParseWarningType {
+    MissingCommaBetweenProcesses,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParseWarning {
+    pub ty: ParseWarningType,
     pub span: Span,
 }
 
@@ -97,12 +109,14 @@ pub struct ParsingResult {
     pub ast: ASTNode,
     pub lexing_errors: Vec<LexError>,
     pub parsing_errors: Vec<ParseError>,
+    pub parsing_warnings: Vec<ParseWarning>,
 }
 
 impl<'lex> Parser<'lex> {
     pub fn new(source: &'lex SourceCode) -> Parser<'lex> {
         Parser {
             source,
+            warnings: Vec::new(),
             tokens: Vec::new(),
             pos: Cell::new(0),
         }
@@ -241,6 +255,7 @@ impl<'lex> Parser<'lex> {
             },
             lexing_errors: result.errors,
             parsing_errors: errors,
+            parsing_warnings: self.warnings.clone(),
         }
     }
 }
@@ -352,14 +367,28 @@ impl<'lex> Parser<'lex> {
     fn parse_process_list(&mut self) -> ParseResult {
         let mut processes = vec![];
         let low = self.peek().span.low();
+        let mut warnings = vec![];
         loop {
             processes.push(self.parse_relation()?);
-            if self.skip(&TokenKind::Comma) {
-                continue;
-            } else {
-                break;
+            match self.peek().kind {
+                TokenKind::Comma => {
+                    self.advance();
+                    continue;
+                }
+                // Missing a comma, treated as if it were present and give a warning
+                TokenKind::Identifier(_) | TokenKind::LeftBrace => {
+                    warnings.push(ParseWarning {
+                        ty: ParseWarningType::MissingCommaBetweenProcesses,
+                        span: self.peek().span,
+                    });
+                    continue;
+                }
+                _ => break,
             }
         }
+
+        // commit the warnings
+        self.warnings.extend(warnings);
         Ok(ASTNode::ProcessList {
             processes,
             span: Span::new(low, self.look_back(1).span.high()),

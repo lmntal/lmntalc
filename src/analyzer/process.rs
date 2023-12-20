@@ -2,12 +2,13 @@ use std::collections::HashMap;
 
 use crate::{ast::ASTNode, util::Span};
 
-use super::SemanticError;
+use super::{SemanticError, SemanticWarning};
 
 #[derive(Debug)]
 pub(super) struct ProcessAnalysisResult {
     pub(super) free_links: Vec<(String, Span)>,
     pub(super) errors: Vec<SemanticError>,
+    pub(super) warnings: Vec<SemanticWarning>,
 }
 
 /// Do semantic analysis on the Membrane ASTNode
@@ -117,6 +118,7 @@ fn analyze_atom(ast: &ASTNode) -> ProcessAnalysisResult {
 
     ProcessAnalysisResult {
         errors,
+        warnings: vec![],
         free_links: link_occurences
             .iter()
             .filter(|pair| pair.1.len() == 1)
@@ -149,5 +151,9 @@ fn filter_link_occurances(
         }
     }
 
-    ProcessAnalysisResult { errors, free_links }
+    ProcessAnalysisResult {
+        warnings: Vec::new(),
+        errors,
+        free_links,
+    }
 }

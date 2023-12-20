@@ -4,7 +4,7 @@ use crate::token::Operator;
 
 use super::{LinkId, Process};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Guard {
     /// List of conditions
     pub constraints: Vec<GuardNode>,
@@ -22,7 +22,7 @@ impl Guard {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum GuardNode {
     /// Variable, reference to a process (`Link` only for now)
     Var(Process),

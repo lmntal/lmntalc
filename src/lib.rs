@@ -17,3 +17,9 @@ pub mod token;
 pub mod transform;
 /// Utilities for the compiler
 pub mod util;
+
+/// This module contains the reporter for LMNtal code depending on `ariadne` crate.
+///
+/// To enable the reporter, use feature `ariadne`.
+#[cfg(feature = "ariadne")]
+pub mod report;

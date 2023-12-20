@@ -1,12 +1,12 @@
 use std::{io, ops::Range};
 
-use ariadne::{Color, ColorGenerator, Fmt, Label, Report, Source};
-use lmntalc::{
-    analyzer::{SemanticAnalysisResult, SemanticError},
-    lexing::{LexError, LexErrorType},
-    parsing::{ParseError, ParseErrorType, ParsingResult},
+use crate::{
+    analyzer::{SemanticAnalysisResult, SemanticError, SemanticWarning},
+    lexing::{self, LexError, LexErrorType},
+    parsing::{self, ParseError, ParseWarning, ParsingResult},
     util::SourceCode,
 };
+use ariadne::{Color, ColorGenerator, Fmt, Label, Report, Source};
 
 pub trait Reportable {
     fn labels<'a>(
@@ -17,16 +17,17 @@ pub trait Reportable {
     fn message(&self) -> String;
 }
 
+#[allow(unused_variables)]
 pub trait Reporter<'src> {
-    fn report_advices(&self, _source: &'src SourceCode) -> io::Result<()> {
+    fn report_advices(&self, source: &'src SourceCode) -> io::Result<()> {
         Ok(())
     }
 
-    fn report_warnings(&self, _source: &'src SourceCode) -> io::Result<()> {
+    fn report_warnings(&self, source: &'src SourceCode) -> io::Result<()> {
         Ok(())
     }
 
-    fn report_errors(&self, _source: &'src SourceCode) -> io::Result<()> {
+    fn report_errors(&self, source: &'src SourceCode) -> io::Result<()> {
         Ok(())
     }
 
@@ -55,13 +56,41 @@ impl<'src> Reporter<'src> for SemanticAnalysisResult {
         Ok(())
     }
 
+    fn report_warnings(&self, source: &'src SourceCode) -> io::Result<()> {
+        for w in &self.warnings {
+            let mut colors = ColorGenerator::new();
+            let mut report = Report::build(ariadne::ReportKind::Warning, source.name(), 0)
+                .with_message(w.message());
+            report = report.with_labels(w.labels(source, &mut colors));
+            report
+                .finish()
+                .eprint((source.name(), Source::from(source.source())))?;
+        }
+        Ok(())
+    }
+
     fn report(&self, source: &'src SourceCode) -> io::Result<()> {
+        self.report_warnings(source)?;
         self.report_errors(source)
     }
 }
 
 impl<'src> Reporter<'src> for ParsingResult {
-    fn report_warnings(&self, _source: &'src SourceCode) -> io::Result<()> {
+    fn report_warnings(&self, source: &'src SourceCode) -> io::Result<()> {
+        for warn in &self.parsing_warnings {
+            let mut colors = ColorGenerator::new();
+            let mut report = Report::build(
+                ariadne::ReportKind::Warning,
+                source.name(),
+                warn.span.low().as_usize(),
+            )
+            .with_message(warn.message());
+            report = report.with_labels(warn.labels(source, &mut colors));
+            report
+                .finish()
+                .eprint((source.name(), Source::from(source.source())))?;
+        }
+
         Ok(())
     }
 
@@ -103,17 +132,17 @@ impl<'src> Reporter<'src> for ParsingResult {
 impl Reportable for LexError {
     fn message(&self) -> String {
         match self.ty {
-            lmntalc::lexing::LexErrorType::Expected(c) => {
+            lexing::LexErrorType::Expected(c) => {
                 format!("Expected {}", c.to_string().fg(Color::Blue))
             }
-            lmntalc::lexing::LexErrorType::UnexpectedCharacter(c) => {
+            lexing::LexErrorType::UnexpectedCharacter(c) => {
                 format!("Unexpected {}", c.to_string().fg(Color::Red))
             }
-            lmntalc::lexing::LexErrorType::UncompleteNumber => "Uncomplete number".to_owned(),
-            lmntalc::lexing::LexErrorType::UncompleteString => "Uncomplete string".to_owned(),
-            lmntalc::lexing::LexErrorType::UnclosedQuote => "Unclosed quote".to_owned(),
-            lmntalc::lexing::LexErrorType::UnclosedComment => "Unclosed comment".to_owned(),
-            lmntalc::lexing::LexErrorType::UnmatchedBracket(c, _) => {
+            lexing::LexErrorType::UncompleteNumber => "Uncomplete number".to_owned(),
+            lexing::LexErrorType::UncompleteString => "Uncomplete string".to_owned(),
+            lexing::LexErrorType::UnclosedQuote => "Unclosed quote".to_owned(),
+            lexing::LexErrorType::UnclosedComment => "Unclosed comment".to_owned(),
+            lexing::LexErrorType::UnmatchedBracket(c, _) => {
                 format!("Unmatched bracket '{}'", c.to_string().fg(Color::Blue))
             }
         }
@@ -148,16 +177,36 @@ impl Reportable for ParseError {
 
     fn message(&self) -> String {
         match &self.ty {
-            ParseErrorType::UnexpectedToken { expected, found } => {
+            parsing::ParseErrorType::UnexpectedToken { expected, found } => {
                 format!(
                     "Expected {}, but found {}",
                     expected.to_string().fg(Color::Blue),
                     found.to_string().fg(Color::Red)
                 )
             }
-            ParseErrorType::UnexpectedEOF => "Unexpected end of file".to_string(),
-            ParseErrorType::WrongCase(ty) => {
+            parsing::ParseErrorType::UnexpectedEOF => "Unexpected end of file".to_string(),
+            parsing::ParseErrorType::WrongCase(ty) => {
                 format!("The identifier should {}.", ty.should().fg(Color::Blue))
+            }
+        }
+    }
+}
+
+impl Reportable for ParseWarning {
+    fn labels<'a>(
+        &'a self,
+        source: &'a SourceCode,
+        colors: &mut ColorGenerator,
+    ) -> Vec<Label<(&str, Range<usize>)>> {
+        vec![Label::new((source.name(), self.span.into()))
+            .with_message(self.message())
+            .with_color(colors.next())]
+    }
+
+    fn message(&self) -> String {
+        match &self.ty {
+            parsing::ParseWarningType::MissingCommaBetweenProcesses => {
+                "Missing comma between processes".to_string()
             }
         }
     }
@@ -212,6 +261,27 @@ impl Reportable for SemanticError {
             SemanticError::TopLevelLinkOccurrence { .. } => {
                 "Top level link is not allowed".to_string()
             }
+        }
+    }
+}
+
+impl Reportable for SemanticWarning {
+    #[allow(unused_variables)]
+    fn labels<'a>(
+        &'a self,
+        source: &'a SourceCode,
+        colors: &mut ColorGenerator,
+    ) -> Vec<Label<(&str, Range<usize>)>> {
+        match self {
+            SemanticWarning::NoInitialProcess => {
+                vec![]
+            }
+        }
+    }
+
+    fn message(&self) -> String {
+        match self {
+            SemanticWarning::NoInitialProcess => "No initial process".to_string(),
         }
     }
 }

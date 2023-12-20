@@ -9,21 +9,55 @@ use crate::{
 use self::guard::visit_guard;
 use super::data::id::*;
 
-pub trait Storage {
+pub(crate) trait Storage {
+    fn next_membrane_id(&mut self) -> MembraneId;
+
     fn add_atom(&mut self, atom: Atom, parent: MembraneId) -> AtomId;
-    fn add_membrane(&mut self, membrane: Membrane, parent: MembraneId) -> MembraneId;
+    fn add_membrane(&mut self, id: MembraneId, membrane: Membrane);
     fn add_rule(&mut self, rule: Rule, parent: MembraneId) -> RuleId;
     fn add_link(&mut self, link: Link, parent: MembraneId) -> LinkId;
     fn add_hyperlink(&mut self, hyperlink: HyperLink, parent: MembraneId) -> HyperLinkId;
 
+    fn get_atom(&self, id: AtomId) -> Option<&Atom>;
     fn get_atom_mut(&mut self, id: AtomId) -> Option<&mut Atom>;
-    fn get_membrane_mut(&mut self, id: MembraneId) -> Option<&mut Membrane>;
 
     fn alpha_connect(&mut self, left: Process, right: Process);
 }
 
+#[derive(Debug)]
+pub enum TransformError {
+    TopLevelLink,
+    UnconstrainedLink,
+    LinkTooManyOccurrence,
+}
+
+#[derive(Debug)]
+pub enum TransformWarning {
+    UnusedVariable,
+}
+
+#[derive(Debug)]
+pub struct TransformResult {
+    pub program: Program,
+    pub warnings: Vec<TransformWarning>,
+    pub errors: Vec<TransformError>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct SolveResult {
+    pub warnings: Vec<TransformWarning>,
+    pub errors: Vec<TransformError>,
+}
+
+impl SolveResult {
+    pub(crate) fn combine(&mut self, other: SolveResult) {
+        self.warnings.extend(other.warnings);
+        self.errors.extend(other.errors);
+    }
+}
+
 /// Transform LMNtal source code into a membrane (initial membrane)
-pub fn transform_lmntal(ast: &ASTNode) -> Program {
+pub fn transform_lmntal(ast: &ASTNode) -> TransformResult {
     let mut program = Program::default();
     if let ASTNode::Membrane {
         name,
@@ -33,27 +67,32 @@ pub fn transform_lmntal(ast: &ASTNode) -> Program {
     } = ast
     {
         // root means void, since the "root membrane" has no parent
-        let void = MembraneId::root();
-        let mem = Membrane::new(name.clone(), void);
-        let root = program.add_membrane(mem, void);
+        let void = MembraneId::void();
+        let mut mem = Membrane::new(name.clone(), void);
+        let root = program.next_membrane_id();
         program.set_root(root);
         for process_list in process_lists {
-            let process =
+            let processes =
                 visit_process_list(process_list, &mut program, Process::Membrane(root), root);
-            program
-                .get_membrane_mut(root)
-                .unwrap()
-                .add_processes(process);
+            mem.add_processes(processes, &program);
         }
         for rule in rules {
             let rule = visit_rule(rule, Process::Membrane(root), root);
             let rule = program.add_rule(rule, root);
-            program.get_membrane_mut(root).unwrap().add_rule(rule);
+            mem.add_rule(rule);
         }
+        program.add_membrane(root, mem);
     } else {
         unreachable!("visit_membrane called with non-membrane node")
     }
-    program
+
+    let err_warn = program.solve();
+
+    TransformResult {
+        program,
+        warnings: err_warn.warnings,
+        errors: err_warn.errors,
+    }
 }
 
 /// Visit a rule node and transform it into a `Rule` struct
@@ -67,40 +106,39 @@ fn visit_rule(node: &ASTNode, from: Process, mem_id: MembraneId) -> Rule {
         ..
     } = node
     {
-        let mut rule = Rule::default();
-
-        let head = visit_process_list(head, &mut rule, from, mem_id);
-        for process in head {
-            if let Process::Link(_) = process {
-                continue;
-            }
-            rule.head.push(process);
-        }
+        // keep only letters and underlscore in the name
+        let mut name = name.clone();
+        name.retain(|c| c.is_alphabetic());
+        let mut rule = Rule::new(name, mem_id);
+        let head_id = MembraneId::head();
+        let head_procs = visit_process_list(head, &mut rule, from, head_id);
+        let mut head = Membrane::new("_head".to_string(), mem_id);
+        head.add_processes(head_procs, &rule);
+        rule.head = head;
 
         if let Some(propagation) = propagation {
-            let propagation = visit_process_list(propagation, &mut rule, from, mem_id);
-            for process in propagation {
-                if let Process::Link(_) = process {
-                    continue;
-                }
-                rule.propagation.push(process);
-            }
+            let propagation_id = MembraneId::propagation();
+            let propagation_procs =
+                visit_process_list(propagation, &mut rule, from, propagation_id);
+            let mut propagation = Membrane::new("_propagation".to_string(), mem_id);
+            propagation.add_processes(propagation_procs, &rule);
+            rule.propagation = propagation;
         }
 
-        rule.set_pattern_parsed();
+        rule.set_head_parsed();
 
         if let Some(guard) = guard {
             rule.guard = visit_guard(&mut rule, guard);
         }
 
         if let Some(body) = body {
-            let body = visit_process_list(body, &mut rule, from, mem_id);
+            let body_id = MembraneId::body();
+            let body_procs = visit_process_list(body, &mut rule, from, body_id);
+            let mut body = Membrane::new("_body".to_string(), mem_id);
+            body.add_processes(body_procs, &rule);
             rule.body = body;
         }
-        // keep only letters in the name
-        let mut name = name.clone();
-        name.retain(|c| c.is_alphabetic());
-        rule.name = name;
+
         rule
     } else {
         unreachable!("visit_rule called with non-rule node")
@@ -159,6 +197,12 @@ fn visit_process(
         ASTNode::Link {
             name, hyperlink, ..
         } => {
+            match from {
+                Process::Atom(_) => {}
+                _ => {
+                    panic!("top level link is not allowed");
+                }
+            }
             if *hyperlink {
                 unimplemented!("hyperlink")
             } else {
@@ -232,19 +276,24 @@ fn visit_membrane(
         ..
     } = node
     {
-        let mem = Membrane::new(name.clone(), mem_id);
-        let proc = store.add_membrane(mem, mem_id);
-        // TODO: proxy links
+        let mut mem = Membrane::new(name.clone(), mem_id);
+        let mem_id = store.next_membrane_id();
+
         for process_list in process_lists {
-            let process = visit_process_list(process_list, store, Process::Membrane(proc), proc);
-            store.get_membrane_mut(proc).unwrap().add_processes(process);
+            let processes =
+                visit_process_list(process_list, store, Process::Membrane(mem_id), mem_id);
+            mem.add_processes(processes, store);
         }
+
         for rule in rules {
-            let rule = visit_rule(rule, Process::Membrane(proc), proc);
+            let rule = visit_rule(rule, Process::Membrane(mem_id), mem_id);
             let rule = store.add_rule(rule, mem_id);
-            store.get_membrane_mut(proc).unwrap().add_rule(rule);
+            mem.add_rule(rule);
         }
-        proc
+
+        store.add_membrane(mem_id, mem);
+
+        mem_id
     } else {
         unreachable!("visit_membrane called with non-membrane node")
     }

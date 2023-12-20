@@ -11,6 +11,11 @@ pub enum SemanticError {
     TopLevelLinkOccurrence { link: String, span: Span },
 }
 
+#[derive(Debug)]
+pub enum SemanticWarning {
+    NoInitialProcess,
+}
+
 impl SemanticError {
     pub fn span(&self) -> Span {
         match self {
@@ -25,18 +30,32 @@ impl SemanticError {
 
 #[derive(Debug)]
 pub struct SemanticAnalysisResult {
+    pub warnings: Vec<SemanticWarning>,
     pub errors: Vec<SemanticError>,
 }
 
 /// Do semantic analysis on the Membrane ASTNode
 pub fn analyze(ast: &ASTNode) -> SemanticAnalysisResult {
-    let mut errors = Vec::new();
+    if let ASTNode::Membrane { process_lists, .. } = ast {
+        if process_lists.is_empty() {
+            return SemanticAnalysisResult {
+                warnings: vec![SemanticWarning::NoInitialProcess],
+                errors: vec![],
+            };
+        }
+    } else {
+        unreachable!();
+    }
+
     let res = analyze_membrane(ast);
-    errors.extend(res.errors);
+    let mut errors = res.errors;
 
     for (link, span) in res.free_links {
         errors.push(SemanticError::FreeLinkOccurrence { link, span });
     }
 
-    SemanticAnalysisResult { errors }
+    SemanticAnalysisResult {
+        warnings: res.warnings,
+        errors,
+    }
 }
