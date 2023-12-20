@@ -5,7 +5,7 @@ license = "MIT"
 description = "A compiler for the LMNtal language"
 readme = "README.md"
 repository = "https://gitlab.ueda.info.waseda.ac.jp/wang/lmntalc"
-version = "0.6.2"
+version = "0.6.3"
 edition = "2021"
 
 [lib]
