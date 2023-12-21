@@ -246,6 +246,12 @@ impl Reportable for SemanticError {
                     .with_color(colors.next());
                 labels.push(label)
             }
+            SemanticError::MembraneInAtomArgument { span } => {
+                let label = Label::new((source.name(), (*span).into()))
+                    .with_message("At here".to_string())
+                    .with_color(colors.next());
+                labels.push(label)
+            }
         }
         labels
     }
@@ -260,6 +266,9 @@ impl Reportable for SemanticError {
             }
             SemanticError::TopLevelLinkOccurrence { .. } => {
                 "Top level link is not allowed".to_string()
+            }
+            SemanticError::MembraneInAtomArgument { .. } => {
+                "Membrane is not allowed in atom argument".to_string()
             }
         }
     }

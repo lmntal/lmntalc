@@ -89,16 +89,17 @@ fn analyze_atom(ast: &ASTNode) -> ProcessAnalysisResult {
                 ASTNode::Atom { .. } => {
                     let atom_errors = analyze_atom(arg);
                     errors.extend(atom_errors.errors);
-                }
-                ASTNode::Membrane { .. } => {
-                    let membrane_errors = analyze_membrane(arg);
-                    errors.extend(membrane_errors.errors);
-                    for free_link in membrane_errors.free_links {
+                    for free_link in atom_errors.free_links {
                         let occurs = link_occurences
                             .entry(free_link.0.clone())
                             .or_insert(Vec::new());
                         occurs.push(free_link.1);
                     }
+                }
+                ASTNode::Membrane { .. } => {
+                    errors.push(SemanticError::MembraneInAtomArgument {
+                        span: arg.span(),
+                    });
                 }
                 _ => unreachable!(),
             }
