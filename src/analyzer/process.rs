@@ -97,9 +97,7 @@ fn analyze_atom(ast: &ASTNode) -> ProcessAnalysisResult {
                     }
                 }
                 ASTNode::Membrane { .. } => {
-                    errors.push(SemanticError::MembraneInAtomArgument {
-                        span: arg.span(),
-                    });
+                    errors.push(SemanticError::MembraneInAtomArgument { span: arg.span() });
                 }
                 _ => unreachable!(),
             }

@@ -2,14 +2,25 @@ use std::{collections::HashMap, fmt::Display};
 
 use crate::token::Operator;
 
-use super::{LinkId, Process};
+use super::id::AtomId;
 
 #[derive(Debug, Default, Clone)]
 pub struct Guard {
     /// List of conditions
     pub constraints: Vec<GuardNode>,
     /// Map from variable id to the expression
-    pub definitions: HashMap<LinkId, GuardNode>,
+    pub definitions: HashMap<AtomId, GuardNode>,
+}
+
+/// Source of a guard
+#[derive(Debug, Clone)]
+pub enum GuardSource {
+    /// Refer to the atom at `AtomId`'s `usize`-th argument
+    AtPortOfAtom(AtomId, usize),
+    /// Refer to the atom that defined in guard
+    Definition(AtomId),
+    /// A placeholder for a variable that will be substituted later
+    Placeholder(String),
 }
 
 impl Guard {
@@ -17,7 +28,7 @@ impl Guard {
         self.constraints.push(node);
     }
 
-    pub(crate) fn add_definition(&mut self, id: LinkId, node: GuardNode) {
+    pub(crate) fn add_definition(&mut self, id: AtomId, node: GuardNode) {
         self.definitions.insert(id, node);
     }
 }
@@ -25,15 +36,13 @@ impl Guard {
 #[derive(Debug, Clone)]
 pub enum GuardNode {
     /// Variable, reference to a process (`Link` only for now)
-    Var(Process),
+    Var(GuardSource),
     /// Integer literal, like `1`
     Int(i64),
     /// Float literal, like `1.0`
     Float(f64),
     /// Function constraint, like `int(X)`, `float(X, Y)`, etc.
-    Func(ProcessConstraint, Vec<Process>),
-    /// Assignment is apart from binary operation for the sake of generation
-    Assign(Process, Box<GuardNode>),
+    Func(ProcessConstraint, Vec<GuardSource>),
     /// Binary operation, like `X + Y`, except assignment
     Binary(Operator, Box<GuardNode>, Box<GuardNode>),
 }

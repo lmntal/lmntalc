@@ -9,6 +9,7 @@ pub enum SemanticError {
     MultipleLinkOccurrence { link: String, spans: Vec<Span> },
     FreeLinkOccurrence { link: String, span: Span },
     TopLevelLinkOccurrence { link: String, span: Span },
+    MembraneInAtomArgument { span: Span },
 }
 
 #[derive(Debug)]
@@ -24,6 +25,7 @@ impl SemanticError {
                 .fold(*spans.first().unwrap(), |acc, span| acc.merge(*span)),
             SemanticError::FreeLinkOccurrence { span, .. } => *span,
             SemanticError::TopLevelLinkOccurrence { span, .. } => *span,
+            SemanticError::MembraneInAtomArgument { span } => *span,
         }
     }
 }

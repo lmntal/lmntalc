@@ -21,7 +21,6 @@ pub struct Program {
     membranes: HashMap<MembraneId, Membrane>,
     rules: HashMap<RuleId, Rule>,
     atoms: HashMap<AtomId, Atom>,
-    links: HashMap<LinkId, Link>,
     hyperlinks: HashMap<HyperLinkId, HyperLink>,
 
     id_generator: id::IdGenerator,
@@ -36,35 +35,20 @@ impl Program {
         self.root
     }
 
-    pub fn atoms(&self, membrane: MembraneId) -> HashMap<AtomId, Atom> {
-        self.membranes.get(&membrane).map_or(HashMap::new(), |mem| {
-            mem.atoms
-                .iter()
-                .map(|id| (*id, self.atoms[id].clone()))
-                .collect()
+    pub fn atoms(&self, membrane: MembraneId) -> Vec<&Atom> {
+        self.membranes.get(&membrane).map_or(Vec::new(), |mem| {
+            mem.atoms.iter().map(|id| &self.atoms[id]).collect()
         })
     }
 
-    pub fn membranes(&self) -> &HashMap<MembraneId, Membrane> {
-        &self.membranes
-    }
-
-    pub fn links(&self, membrane: MembraneId) -> HashMap<LinkId, Link> {
-        self.membranes.get(&membrane).map_or(HashMap::new(), |mem| {
-            mem.links
-                .iter()
-                .map(|id| (*id, self.links[id].clone()))
-                .collect()
+    pub fn membranes(&self, membrane: MembraneId) -> Vec<&Membrane> {
+        self.membranes.get(&membrane).map_or(Vec::new(), |mem| {
+            mem.membranes.iter().map(|id| &self.membranes[id]).collect()
         })
     }
 
-    pub fn hyperlinks(&self, membrane: MembraneId) -> HashMap<HyperLinkId, HyperLink> {
-        self.membranes.get(&membrane).map_or(HashMap::new(), |mem| {
-            mem.hyperlinks
-                .iter()
-                .map(|id| (*id, self.hyperlinks[id].clone()))
-                .collect()
-        })
+    pub fn hyperlinks(&self) -> Vec<&HyperLink> {
+        self.hyperlinks.values().collect()
     }
 
     pub fn rules(&self, membrane: MembraneId) -> Vec<Rule> {
@@ -111,8 +95,6 @@ pub struct Membrane {
     rules: Vec<RuleId>,
     membranes: HashSet<MembraneId>,
     atoms: HashSet<AtomId>,
-    links: HashSet<LinkId>,
-    hyperlinks: HashSet<HyperLinkId>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -120,20 +102,22 @@ pub struct Atom {
     pub parent: MembraneId,
     pub name: String,
     pub data: Data,
-    pub args: Vec<Process>,
+    pub hyperlink: bool,
+    pub args: Vec<Link>,
 }
 
 #[derive(Debug, Default, Clone)]
 pub struct Link {
     pub name: String,
-    pub arg1: Option<(Process, usize)>,
-    pub arg2: Option<(Process, usize)>,
+    pub this: (AtomId, usize),
+    pub opposite: Option<(AtomId, usize)>,
 }
 
 #[derive(Debug, Default, Clone)]
 pub struct HyperLink {
     pub name: String,
-    pub args: Vec<Process>,
+    pub this: (AtomId, usize),
+    pub others: Vec<(AtomId, usize)>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -146,93 +130,7 @@ pub enum Data {
     String(String),
 }
 
-impl Storage for Program {
-    fn next_membrane_id(&mut self) -> MembraneId {
-        self.id_generator.next_membrane_id()
-    }
-
-    fn add_atom(&mut self, atom: Atom, parent: MembraneId) -> AtomId {
-        let id = self.id_generator.next_atom_id(parent);
-        self.atoms.insert(id, atom);
-        id
-    }
-
-    fn add_membrane(&mut self, id: MembraneId, membrane: Membrane) {
-        self.membranes.insert(id, membrane);
-    }
-
-    fn add_rule(&mut self, rule: Rule, parent: MembraneId) -> RuleId {
-        let id = self.id_generator.next_rule_id(parent);
-        self.rules.insert(id, rule);
-        id
-    }
-
-    fn add_link(&mut self, link: Link, parent: MembraneId) -> LinkId {
-        let links = self.link_with_id(parent);
-        for (id, link_) in links.iter() {
-            if link.name == link_.name {
-                return *id;
-            }
-        }
-        let id = self.id_generator.next_link_id(parent);
-        self.links.insert(id, link);
-        id
-    }
-
-    fn add_hyperlink(&mut self, hyperlink: HyperLink, parent: MembraneId) -> HyperLinkId {
-        let hyperlinks = self.hyperlink_with_id(parent);
-        for (id, hyperlink_) in hyperlinks.iter() {
-            if hyperlink.name == hyperlink_.name {
-                return *id;
-            }
-        }
-        let id = self.id_generator.next_hyperlink_id(parent);
-        self.hyperlinks.insert(id, hyperlink);
-        id
-    }
-
-    fn get_atom(&self, id: AtomId) -> Option<&Atom> {
-        self.atoms.get(&id)
-    }
-
-    fn get_atom_mut(&mut self, id: AtomId) -> Option<&mut Atom> {
-        self.atoms.get_mut(&id)
-    }
-
-    fn alpha_connect(&mut self, left: Process, right: Process) {
-        match (left, right) {
-            (Process::Atom(id), Process::Atom(other_id)) => {
-                self.get_atom_mut(id).unwrap().args.push(right);
-                self.get_atom_mut(other_id).unwrap().args.push(left);
-            }
-            (Process::Atom(atom), Process::Link(_)) => {
-                self.get_atom_mut(atom).unwrap().args.push(right);
-            }
-            (Process::Link(_), Process::Atom(atom)) => {
-                self.get_atom_mut(atom).unwrap().args.push(left);
-            }
-            _ => unimplemented!(),
-        }
-    }
-}
-
 impl Program {
-    fn link_with_id(&self, membrane: MembraneId) -> Vec<(LinkId, Link)> {
-        self.links
-            .iter()
-            .filter(|(id, _)| id.parent() == membrane.id())
-            .map(|(id, link)| (*id, link.clone()))
-            .collect()
-    }
-
-    fn hyperlink_with_id(&self, membrane: MembraneId) -> Vec<(HyperLinkId, HyperLink)> {
-        self.hyperlinks
-            .iter()
-            .filter(|(id, _)| id.parent() == membrane.id())
-            .map(|(id, link)| (*id, link.clone()))
-            .collect()
-    }
-
     pub(crate) fn solve(&mut self) -> SolveResult {
         let root = self.root;
         let mut free = vec![];
@@ -240,6 +138,10 @@ impl Program {
 
         if !free.is_empty() {
             res.errors.push(TransformError::UnconstrainedLink);
+        }
+
+        for atom in self.atoms.values() {
+            println!("{}", atom);
         }
 
         res
@@ -256,136 +158,163 @@ impl Program {
             result.combine(self.solve_membrane(mem, free_links));
         }
 
-        for rule in membrane.rules.iter() {
-            let rule = self.rules.get_mut(rule).unwrap();
-            result.combine(rule.solve());
-        }
+        let mut connectors = vec![];
 
-        for atom_id in &membrane.atoms {
-            let atom = self.atoms.get(atom_id).unwrap();
-            for (idx, arg) in atom.args.iter().enumerate() {
-                if let Process::Link(id) = arg {
-                    let link = self.links.get_mut(id).unwrap();
-                    if link.arg1.is_none() {
-                        link.arg1 = Some((Process::Atom(*atom_id), idx));
-                    } else if link.arg2.is_none() {
-                        link.arg2 = Some((Process::Atom(*atom_id), idx));
-                    } else {
-                        result.errors.push(TransformError::LinkTooManyOccurrence);
-                    }
-                }
-            }
-        }
+        // fix links
 
-        struct Update {
-            atom: AtomId,
-            pos: usize,
-            process: Process,
-        }
-
+        let mut links = free_links
+            .iter()
+            .map(|link| (link.name.clone(), link.this))
+            .collect::<HashMap<_, _>>();
+        let mut connected = HashSet::new();
         let mut updates = vec![];
 
         for atom_id in &membrane.atoms {
             let atom = self.atoms.get_mut(atom_id).unwrap();
-            for arg in atom.args.iter_mut() {
-                if let Process::Link(id) = arg {
-                    let link = self.links.get(id).unwrap();
-                    if let Some((Process::Atom(id), _)) = &link.arg1 {
-                        if id == atom_id {
-                            if let Some((p, _)) = &link.arg2 {
-                                *arg = *p;
-                            } else {
-                                // the other side of the link is not connected
-                                // so we need to connect it to a free link from inner membranes if possible
-                                for link_ in free_links.iter_mut() {
-                                    // same name
-                                    if link_.name == link.name {
-                                        if let Some((Process::Atom(other_id), pos)) = link_.arg1 {
-                                            *arg = Process::Atom(other_id);
-                                            updates.push(Update {
-                                                atom: other_id,
-                                                pos,
-                                                process: Process::Atom(*atom_id),
-                                            });
-                                            link_.arg1 = None;
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            *arg = Process::Atom(*id);
+            if atom.name == "=" && atom.args.len() == 2 {
+                connectors.push(*atom_id);
+            }
+            for link in &atom.args {
+                if link.opposite.is_none() {
+                    if connected.contains(&link.name) {
+                        // link with the same name already connected
+                        result.errors.push(TransformError::LinkTooManyOccurrence);
+                    } else {
+                        // link with the same name not connected
+                        if let Some(other) = links.insert(link.name.clone(), link.this) {
+                            updates.push((other, link.this));
+                            connected.insert(link.name.clone());
                         }
                     }
                 }
             }
         }
 
-        for update in updates {
-            let atom = self.atoms.get_mut(&update.atom).unwrap();
-            atom.args[update.pos] = update.process;
+        for (from, to) in updates {
+            let atom = self.atoms.get_mut(&from.0).unwrap();
+            atom.args[from.1].opposite = Some(to);
+            let atom = self.atoms.get_mut(&to.0).unwrap();
+            atom.args[to.1].opposite = Some(from);
         }
 
-        let mut remove = vec![];
+        free_links.extend(links.into_iter().map(|(name, this)| Link {
+            name,
+            this,
+            opposite: None,
+        }));
 
-        for link_id in membrane.links.iter() {
-            let link = self.links.get(link_id).unwrap();
-            match (link.arg1, link.arg2) {
-                (None, None) | (None, Some(_)) => unreachable!(),
-                (Some(_), None) => {
-                    free_links.push(link.clone());
-                }
-                (Some(_), Some(_)) => {
-                    // both sides are connected
-                    // so we don't need this link anymore
-                    remove.push(*link_id);
-                }
+        // unification
+
+        let mem = self.membranes.get_mut(membrane_id).unwrap();
+
+        for connector in connectors {
+            let atom = self.atoms.get_mut(&connector).unwrap();
+            let left = atom.args[0].opposite.unwrap();
+            let right = atom.args[1].opposite.unwrap();
+            let name = atom.args[1].name.clone();
+
+            {
+                let atom = self.atoms.get_mut(&left.0).unwrap();
+                atom.args[left.1].opposite = Some(right);
+                atom.args[left.1].name = name.clone();
             }
+            {
+                let atom = self.atoms.get_mut(&right.0).unwrap();
+                atom.args[right.1].opposite = Some(left);
+            }
+
+            mem.atoms.remove(&connector);
+            self.atoms.remove(&connector);
         }
 
-        let membrane = self.membranes.get_mut(membrane_id).unwrap();
-        for link_id in remove {
-            self.links.remove(&link_id);
-            membrane.links.remove(&link_id);
+        for rule in membrane.rules.iter() {
+            let rule = self.rules.get_mut(rule).unwrap();
+            result.combine(rule.solve());
         }
-
-        free_links.retain(|link| link.arg1.is_some());
 
         result
     }
 }
 
-impl Membrane {
-    pub(crate) fn add_processes(&mut self, processes: Vec<Process>, storage: &impl Storage) {
-        for process in processes {
-            self.add_process(&process, storage);
+impl Storage for Program {
+    fn next_membrane_id(&mut self) -> MembraneId {
+        self.id_generator.next_membrane_id()
+    }
+
+    fn next_atom_id(&mut self, parent: MembraneId) -> AtomId {
+        self.id_generator.next_atom_id(parent)
+    }
+
+    fn temp_link_name(&mut self) -> String {
+        let id = self.id_generator.next_link_id();
+        format!("~{}", id.id())
+    }
+
+    fn add_atom(&mut self, id: AtomId, atom: Atom) {
+        self.atoms.insert(id, atom);
+    }
+
+    fn add_membrane(&mut self, id: MembraneId, membrane: Membrane) {
+        self.membranes.insert(id, membrane);
+    }
+
+    fn add_rule(&mut self, rule: Rule, parent: MembraneId) -> RuleId {
+        let id = self.id_generator.next_rule_id(parent);
+        self.rules.insert(id, rule);
+        id
+    }
+
+    fn add_hyperlink(&mut self, hyperlink: HyperLink) -> HyperLinkId {
+        for (id, hyperlink_) in &self.hyperlinks {
+            if hyperlink.name == hyperlink_.name {
+                return *id;
+            }
+        }
+        let id = self.id_generator.next_hyperlink_id();
+        self.hyperlinks.insert(id, hyperlink);
+        id
+    }
+
+    fn append_atom_arg(&mut self, id: AtomId, link: Link) {
+        if let Some(atom) = self.atoms.get_mut(&id) {
+            atom.args.push(link);
         }
     }
 
-    fn add_process(&mut self, process: &Process, storage: &impl Storage) {
-        match process {
-            Process::Atom(id) => {
-                if !self.atoms.insert(*id) {
-                    return;
+    fn get_atom_arg_len(&self, id: AtomId) -> usize {
+        self.atoms.get(&id).map_or(0, |atom| atom.args.len())
+    }
+}
+
+impl Membrane {
+    pub(crate) fn add_processes(&mut self, processes: Vec<Process>) {
+        for process in processes {
+            match process {
+                Process::Atom(id) => {
+                    self.atoms.insert(id);
                 }
-                let atom = storage.get_atom(*id).unwrap();
-                for arg in atom.args.iter() {
-                    self.add_process(arg, storage);
+                Process::Membrane(id) => {
+                    self.membranes.insert(id);
                 }
-            }
-            Process::Membrane(id) => {
-                self.membranes.insert(*id);
-            }
-            Process::Link(id) => {
-                self.links.insert(*id);
-            }
-            Process::Hyperlink(id) => {
-                self.hyperlinks.insert(*id);
+                _ => {}
             }
         }
     }
 
     pub(crate) fn add_rule(&mut self, rule: RuleId) {
         self.rules.push(rule);
+    }
+}
+
+impl Display for Atom {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let args = self
+            .args
+            .iter()
+            .map(|link| link.name.clone())
+            .collect::<Vec<_>>()
+            .join(", ");
+        write!(f, "{}({})", self.name, args)
     }
 }
 
@@ -397,6 +326,17 @@ impl Display for Data {
             Data::Float(fl) => write!(f, "{}", fl),
             Data::Char(c) => write!(f, "\'{}\'", c),
             Data::String(s) => write!(f, "\"{}\"", s),
+        }
+    }
+}
+
+impl Process {
+    pub fn get_id(&self) -> u64 {
+        match self {
+            Self::Atom(id) => (*id).into(),
+            Self::Membrane(id) => id.id().into(),
+            Self::Link(id) => (*id).into(),
+            Self::Hyperlink(id) => (*id).into(),
         }
     }
 }
@@ -424,17 +364,6 @@ impl Hash for Process {
     }
 }
 
-impl Process {
-    pub fn get_id(&self) -> u64 {
-        match self {
-            Self::Atom(id) => (*id).into(),
-            Self::Membrane(id) => id.id().into(),
-            Self::Link(id) => (*id).into(),
-            Self::Hyperlink(id) => (*id).into(),
-        }
-    }
-}
-
 impl PartialEq for Process {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -452,25 +381,6 @@ impl Membrane {
             parent,
             name,
             ..Default::default()
-        }
-    }
-}
-
-impl Link {
-    pub fn new(name: &str) -> Link {
-        Link {
-            name: name.to_string(),
-            arg1: None,
-            arg2: None,
-        }
-    }
-}
-
-impl HyperLink {
-    pub fn new(name: &str) -> HyperLink {
-        HyperLink {
-            name: name.to_string(),
-            args: Vec::new(),
         }
     }
 }

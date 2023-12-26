@@ -6,6 +6,7 @@ use lmntalc::{
     ast::tree,
     parsing::{self},
     report::Reporter,
+    transform::transform_lmntal,
     util::SourceCode,
 };
 

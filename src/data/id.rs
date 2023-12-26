@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-macro_rules! ids {
+macro_rules! id_with_parent {
     (
         $(
             $name:ident
@@ -49,15 +49,52 @@ macro_rules! ids {
                     (self.0 & 0xFFFFFFFF) as u32
                 }
             }
+
+            impl std::fmt::Display for $name {
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    write!(f, "{}:{}", self.parent(), self.id())
+                }
+            }
         )*
     };
 }
 
-ids! {
-    RuleId,
-    AtomId,
-    LinkId,
-    HyperLinkId
+macro_rules! id_without_parent {
+    (
+        $(
+            $name:ident, $data:ty
+        ),*
+    ) => {
+        $(
+            impl From<$name> for $data {
+                fn from(id: $name) -> Self {
+                    id.0
+                }
+            }
+
+            impl From<$data> for $name {
+                fn from(id: $data) -> Self {
+                    Self(id)
+                }
+            }
+
+            impl $name {
+                pub fn new(id: $data) -> Self {
+                    Self(id)
+                }
+
+                pub fn id(&self) -> $data {
+                    self.0
+                }
+            }
+
+            impl std::fmt::Display for $name {
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    write!(f, "{}", self.id())
+                }
+            }
+        )*
+    };
 }
 
 /// A unique identifier for a membrane, which is a 32-bit unsigned integer
@@ -70,50 +107,44 @@ ids! {
 pub struct MembraneId(u32);
 
 impl MembraneId {
-    pub(super) fn new(id: u32) -> Self {
-        Self(id)
-    }
-
+    /// Create a void membrane ID, which is a membrane ID that will never be used (perhaps).
     pub(crate) fn void() -> Self {
         Self::new(u32::MAX)
     }
-
-    pub(crate) fn head() -> Self {
-        Self::new(u32::MAX - 1)
-    }
-
-    pub(crate) fn propagation() -> Self {
-        Self::new(u32::MAX - 2)
-    }
-
-    pub(crate) fn body() -> Self {
-        Self::new(u32::MAX - 3)
-    }
-
-    pub fn id(&self) -> u32 {
-        self.0
-    }
 }
 
-impl From<u32> for MembraneId {
-    fn from(id: u32) -> Self {
-        Self(id)
-    }
+/// A unique identifier for a link, which is a 64-bit unsigned integer
+///
+/// Because links will be finally eliminated, and they don't belong to any membrane,
+/// so we don't need to store the parent membrane ID in the link ID.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LinkId(u64);
+
+/// A unique identifier for a hyperlink, which is a 64-bit unsigned integer
+///
+/// Because hyperlinks will be finally eliminated, and they don't belong to any membrane,
+/// so we don't need to store the parent membrane ID in the hyperlink ID.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct HyperLinkId(u64);
+
+id_with_parent! {
+    RuleId,
+    AtomId
 }
 
-impl From<MembraneId> for u32 {
-    fn from(id: MembraneId) -> Self {
-        id.0
-    }
+id_without_parent! {
+    MembraneId, u32,
+    LinkId, u64,
+    HyperLinkId, u64
 }
 
 #[derive(Debug, Default, Clone)]
 pub(super) struct IdGenerator {
     mem_counter: u32,
     atom_counter: HashMap<MembraneId, u32>,
-    link_counter: HashMap<MembraneId, u32>,
     rule_counter: HashMap<MembraneId, u32>,
-    hyperlink_counter: HashMap<MembraneId, u32>,
+    link_counter: u64,
+    hyperlink_counter: u64,
 }
 
 impl IdGenerator {
@@ -128,22 +159,20 @@ impl IdGenerator {
         AtomId::new(parent.into(), *counter)
     }
 
-    pub(super) fn next_link_id(&mut self, parent: MembraneId) -> LinkId {
-        let counter = self.link_counter.entry(parent).or_insert(0);
-        *counter += 1;
-        LinkId::new(parent.into(), *counter)
-    }
-
     pub(super) fn next_rule_id(&mut self, parent: MembraneId) -> RuleId {
         let counter = self.rule_counter.entry(parent).or_insert(0);
         *counter += 1;
         RuleId::new(parent.into(), *counter)
     }
 
-    pub(super) fn next_hyperlink_id(&mut self, parent: MembraneId) -> HyperLinkId {
-        let counter = self.hyperlink_counter.entry(parent).or_insert(0);
-        *counter += 1;
-        HyperLinkId::new(parent.into(), *counter)
+    pub(super) fn next_link_id(&mut self) -> LinkId {
+        self.link_counter += 1;
+        LinkId::new(self.link_counter - 1)
+    }
+
+    pub(super) fn next_hyperlink_id(&mut self) -> HyperLinkId {
+        self.hyperlink_counter += 1;
+        HyperLinkId::new(self.hyperlink_counter - 1)
     }
 }
 
