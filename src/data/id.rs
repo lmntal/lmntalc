@@ -41,8 +41,8 @@ macro_rules! id_with_parent {
                     Self((parent << 32) | id)
                 }
 
-                pub fn parent(&self) -> u32 {
-                    (self.0 >> 32) as u32
+                pub fn parent(&self) -> MembraneId {
+                    ((self.0 >> 32) as u32).into()
                 }
 
                 pub fn id(&self) -> u32 {

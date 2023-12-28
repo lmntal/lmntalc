@@ -1,9 +1,14 @@
-use std::{io, path::PathBuf};
+use std::{
+    io::{self, Write},
+    path::PathBuf,
+};
 
 use clap::Parser;
 use lmntalc::{
     analyzer::analyze,
     ast::tree,
+    backend::{cpp::CppBackend, java::JavaBackend, python::PythonBackend, Backend, Target},
+    generator::Generator,
     parsing::{self},
     report::Reporter,
     transform::transform_lmntal,
@@ -14,11 +19,20 @@ use lmntalc::{
 #[command(name = "LMNtal Compiler")]
 #[command(author, version, about, long_about = None)]
 struct Cli {
-    #[arg(value_name = "FILE")]
-    source: PathBuf,
+    #[arg(short, long, default_value = "cpp", help = "Target language")]
+    pub target: Target,
+
+    #[arg(short, long, help = "Output file name")]
+    pub output: Option<PathBuf>,
 
     #[arg(long, value_name = "dump ast", default_value = "false")]
     dump_ast: bool,
+
+    #[arg(long, value_name = "show ir", default_value = "false")]
+    show_ir: bool,
+
+    #[arg(value_name = "FILE")]
+    source: PathBuf,
 }
 
 fn main() -> io::Result<()> {
@@ -40,6 +54,41 @@ fn main() -> io::Result<()> {
     let analysis_res = analyze(&res.ast);
     analysis_res.report(&code)?;
 
+    let transform_res = transform_lmntal(&res.ast);
+
+    let mut gen = Generator::new();
+    gen.generate(&transform_res.program);
+
+    let output_file_name = if let Some(ref output_file_name) = cli.output {
+        output_file_name.clone()
+    } else {
+        let mut file_name = path.clone();
+        file_name.set_extension(cli.target.extension());
+        file_name
+    };
+
+    let mut output_file = std::fs::File::create(output_file_name.clone())
+        .unwrap_or_else(|_| panic!("cannot create file {}", output_file_name.display()));
+
+    let code = match cli.target {
+        Target::Cpp => {
+            let mut backend = CppBackend::new();
+            output(&mut backend, &gen, &cli)
+        }
+        Target::Python => {
+            let mut backend = PythonBackend::new();
+            output(&mut backend, &gen, &cli)
+        }
+        Target::Java => {
+            let mut backend = JavaBackend::new();
+            output(&mut backend, &gen, &cli)
+        }
+    };
+
+    output_file
+        .write_all(code.as_bytes())
+        .expect("cannot write file");
+
     if cli.dump_ast {
         let t = tree(&res.ast, "Root membrane".to_owned());
         match t {
@@ -48,5 +97,13 @@ fn main() -> io::Result<()> {
         }
     }
 
+    if cli.show_ir {
+        println!("{}", gen);
+    }
+
     Ok(())
+}
+
+fn output(backend: &mut impl Backend, generator: &Generator, arg: &Cli) -> String {
+    backend.pretty_print(generator)
 }

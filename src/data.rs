@@ -35,9 +35,9 @@ impl Program {
         self.root
     }
 
-    pub fn atoms(&self, membrane: MembraneId) -> Vec<&Atom> {
-        self.membranes.get(&membrane).map_or(Vec::new(), |mem| {
-            mem.atoms.iter().map(|id| &self.atoms[id]).collect()
+    pub fn atoms(&self, membrane: MembraneId) -> HashMap<AtomId, &Atom> {
+        self.membranes.get(&membrane).map_or(HashMap::new(), |mem| {
+            mem.atoms.iter().map(|id| (*id, &self.atoms[id])).collect()
         })
     }
 
@@ -138,10 +138,6 @@ impl Program {
 
         if !free.is_empty() {
             res.errors.push(TransformError::UnconstrainedLink);
-        }
-
-        for atom in self.atoms.values() {
-            println!("{}", atom);
         }
 
         res

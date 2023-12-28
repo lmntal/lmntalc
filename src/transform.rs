@@ -220,9 +220,9 @@ fn visit_atom(
         let (name, data) = match name {
             AtomName::Plain(s) | AtomName::Keyword(s) => (s.to_string(), Data::Empty),
             AtomName::Operator(op) => (op.to_string(), Data::Empty),
-            AtomName::Int(i) => (i.to_string(), Data::Int(*i)),
-            AtomName::Float(f) => (f.to_string(), Data::Float(*f)),
-            AtomName::Char(c) => (c.to_string(), Data::Char(*c)),
+            AtomName::Int(i) => ("_int".to_owned(), Data::Int(*i)),
+            AtomName::Float(f) => ("_float".to_owned(), Data::Float(*f)),
+            AtomName::Char(c) => ("_char".to_owned(), Data::Char(*c)),
         };
 
         let id = store.next_atom_id(mem_id);

@@ -9,6 +9,7 @@ use super::{guard::Guard, Atom, Data, HyperLink, Link, Membrane};
 
 use super::id::*;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct RuleAtom {
     parent: MembraneId,
@@ -52,6 +53,8 @@ pub struct Rule {
 /// Argument of a link in a rule
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RuleLinkArg {
+    /// Not linked to any atom yet
+    None,
     /// Appears in the head of the rule,
     /// with the position of the link in the `Process`
     Head(AtomId, usize),
@@ -67,22 +70,25 @@ pub struct RuleLink {
     pub name: String,
     pub this: RuleLinkArg,
     pub opposite_type: Option<ProcessConstraint>,
-    pub opposite: Option<RuleLinkArg>,
+    pub opposite: RuleLinkArg,
 }
 
-/// Status of a link in a rule
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum RuleLinkStatus {
-    /// Plain link
-    Plain,
-    /// Free link in head that will be linked to a free link in body
-    LinkedInHeadAndBody,
-    /// Type constrained link
-    Guarded,
-    /// Defined but not used, will raise warning
-    Unused,
-    /// Unconstrained free link, will raise error
-    Unconstrained,
+impl RuleAtom {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn args(&self) -> impl Iterator<Item = &RuleLink> {
+        self.args.iter()
+    }
+
+    pub fn data(&self) -> &Data {
+        &self.data
+    }
+
+    pub fn type_(&self) -> Option<ProcessConstraint> {
+        self.type_
+    }
 }
 
 impl RuleLink {
@@ -95,28 +101,63 @@ impl RuleLink {
                 RuleLinkArg::Body(link.this.0, link.this.1)
             },
             opposite_type: None,
-            opposite: link.opposite.map(|opposite| {
-                if head {
-                    RuleLinkArg::Head(opposite.0, opposite.1)
-                } else {
-                    RuleLinkArg::Body(opposite.0, opposite.1)
+            opposite: match &link.opposite {
+                Some(opposite) => {
+                    if head {
+                        RuleLinkArg::Head(opposite.0, opposite.1)
+                    } else {
+                        RuleLinkArg::Body(opposite.0, opposite.1)
+                    }
                 }
-            }),
+                None => RuleLinkArg::None,
+            },
         }
     }
 }
 
+#[allow(dead_code)]
 impl RuleLinkArg {
-    fn atom_id(&self) -> AtomId {
+    pub(crate) fn id_index(&self) -> Option<(AtomId, usize)> {
         match self {
-            Self::Head(id, _) | Self::Temp(id, _) | Self::Body(id, _) => *id,
+            Self::Head(id, index) | Self::Temp(id, index) | Self::Body(id, index) => {
+                Some((*id, *index))
+            }
+            RuleLinkArg::None => None,
         }
     }
 
-    fn index(&self) -> usize {
+    pub(crate) fn atom_id(&self) -> Option<AtomId> {
         match self {
-            Self::Head(_, index) | Self::Temp(_, index) | Self::Body(_, index) => *index,
+            Self::Head(id, _) | Self::Temp(id, _) | Self::Body(id, _) => Some(*id),
+            RuleLinkArg::None => None,
         }
+    }
+
+    pub(crate) fn index(&self) -> Option<usize> {
+        match self {
+            Self::Head(_, index) | Self::Temp(_, index) | Self::Body(_, index) => Some(*index),
+            RuleLinkArg::None => None,
+        }
+    }
+
+    pub(crate) fn is_none(&self) -> bool {
+        matches!(self, RuleLinkArg::None)
+    }
+
+    pub(crate) fn is_temp(&self) -> bool {
+        matches!(self, RuleLinkArg::Temp(_, _))
+    }
+
+    pub(crate) fn is_head(&self) -> bool {
+        matches!(self, RuleLinkArg::Head(_, _))
+    }
+
+    pub(crate) fn is_body(&self) -> bool {
+        matches!(self, RuleLinkArg::Body(_, _))
+    }
+
+    pub(crate) fn is_linked(&self) -> bool {
+        !matches!(self, RuleLinkArg::None)
     }
 }
 
@@ -126,6 +167,7 @@ impl Display for RuleLinkArg {
             Self::Head(id, index) => write!(f, "Head({}, {})", id, index),
             Self::Temp(id, index) => write!(f, "Temp({}, {})", id, index),
             Self::Body(id, index) => write!(f, "Body({}, {})", id, index),
+            RuleLinkArg::None => write!(f, "None"),
         }
     }
 }
@@ -213,6 +255,37 @@ impl Rule {
         }
     }
 
+    pub(crate) fn all_atoms(&self) -> &HashMap<AtomId, RuleAtom> {
+        &self.atoms
+    }
+
+    pub(crate) fn head_atoms(&self) -> HashMap<AtomId, &RuleAtom> {
+        self.membranes[&self.head]
+            .atoms
+            .iter()
+            .map(move |id| (*id, &self.atoms[id]))
+            .collect()
+    }
+
+    pub(crate) fn body_atoms(&self) -> HashMap<AtomId, &RuleAtom> {
+        self.membranes[&self.body]
+            .atoms
+            .iter()
+            .map(move |id| (*id, &self.atoms[id]))
+            .collect()
+    }
+
+    pub(crate) fn definitions(&self) -> HashMap<AtomId, &RuleAtom> {
+        self.definitions
+            .iter()
+            .map(|(id, atom)| (*id, atom))
+            .collect()
+    }
+
+    pub(crate) fn is_in_head(&self, id: MembraneId) -> bool {
+        self.head_membranes.contains(&id)
+    }
+
     pub(crate) fn set_head_parsed(&mut self) {
         self.head_parsed = true;
     }
@@ -249,41 +322,6 @@ impl Rule {
         self.definitions.insert(id, atom);
         self.def_name.insert(name.to_owned(), id);
         id
-    }
-
-    fn print(&self) {
-        let mut str = String::new();
-        for id in &self.membranes[&self.head].atoms {
-            let atom = &self.atoms[id];
-            str.push_str(&format!("[{}]{}(", id, atom.name));
-            for link in &atom.args {
-                str.push_str(&format!("{}<", link.name));
-                str.push_str(&format!("{}", link.this));
-                if let Some(opposite) = link.opposite {
-                    str.push_str(&format!(", {}", opposite));
-                }
-                str.push_str(">, ");
-            }
-            str.push_str("), ");
-        }
-
-        str.push_str(" :- ");
-
-        for id in &self.membranes[&self.body].atoms {
-            let atom = &self.atoms[id];
-            str.push_str(&format!("[{}]{}(", id, atom.name));
-            for link in &atom.args {
-                str.push_str(&format!("{}<", link.name));
-                str.push_str(&format!("{}", link.this));
-                if let Some(opposite) = link.opposite {
-                    str.push_str(&format!(", {}", opposite));
-                }
-                str.push_str(">, ");
-            }
-            str.push_str("), ");
-        }
-
-        println!("{}", str);
     }
 
     pub(super) fn solve(&mut self) -> SolveResult {
@@ -335,7 +373,7 @@ impl Rule {
             for link in atom.args.iter_mut() {
                 if link.opposite.is_none() {
                     if let Some(def_id) = self.def_name.get(&link.name) {
-                        link.opposite = Some(RuleLinkArg::Temp(*def_id, 0));
+                        link.opposite = RuleLinkArg::Temp(*def_id, 0);
                     }
                     if connected.contains(&link.name) {
                         // link with the same name already connected
@@ -352,16 +390,20 @@ impl Rule {
         }
 
         for (from, to) in updates {
-            let atom = self.atoms.get_mut(&from.atom_id()).unwrap();
-            atom.args[from.index()].opposite = Some(to);
-            let atom = self.atoms.get_mut(&to.atom_id()).unwrap();
-            atom.args[to.index()].opposite = Some(from);
+            if let Some((id, idx)) = from.id_index() {
+                let atom = self.atoms.get_mut(&id).unwrap();
+                atom.args[idx].opposite = to;
+            }
+            if let Some((id, idx)) = to.id_index() {
+                let atom = self.atoms.get_mut(&id).unwrap();
+                atom.args[idx].opposite = from;
+            }
         }
 
         free_links.extend(links.into_iter().map(|(name, this)| RuleLink {
             name,
             this,
-            opposite: None,
+            opposite: RuleLinkArg::None,
             opposite_type: None,
         }));
 
@@ -378,9 +420,11 @@ impl Rule {
                         if let GuardSource::Placeholder(name) = var {
                             for link in free_links {
                                 if link.name == *name {
-                                    let atom = self.atoms.get_mut(&link.this.atom_id()).unwrap();
-                                    atom.args[link.this.index()].opposite_type = Some(*func);
-                                    continue 'var;
+                                    if let Some((id, idx)) = link.this.id_index() {
+                                        let atom = self.atoms.get_mut(&id).unwrap();
+                                        atom.args[idx].opposite_type = Some(*func);
+                                        continue 'var;
+                                    }
                                 }
                             }
                         }
@@ -402,10 +446,9 @@ impl Rule {
                     if let GuardSource::Placeholder(name) = var {
                         for link in free_links {
                             if link.name == *name {
-                                *var = GuardSource::AtPortOfAtom(
-                                    link.this.atom_id(),
-                                    link.this.index(),
-                                );
+                                if let Some((id, idx)) = link.this.id_index() {
+                                    *var = GuardSource::AtPortOfAtom(id, idx);
+                                }
                                 continue 'def; // continue to next definition, otherwise it is unconstrained
                             }
                         }
@@ -422,8 +465,12 @@ impl Rule {
                 }
                 GuardNode::Binary(op, lhs, rhs) => {
                     let op = *op;
-                    _ = self.substitute_link_in_guard_with_type(lhs, &op.into(), free_links);
-                    _ = self.substitute_link_in_guard_with_type(rhs, &op.into(), free_links);
+                    let _left =
+                        self.substitute_link_in_guard_with_type(lhs, &op.into(), free_links);
+                    let _right =
+                        self.substitute_link_in_guard_with_type(rhs, &op.into(), free_links);
+                    let atom = self.definitions.get_mut(def.0).unwrap();
+                    atom.type_ = Some(op.into());
                 }
                 GuardNode::Func(..) => unreachable!(),
             }
@@ -455,25 +502,23 @@ impl Rule {
                         }
                     }
                     GuardSource::Definition(def) => {
-                        let atom = self.definitions.get(def).unwrap();
+                        let atom = self.definitions.get_mut(def).unwrap();
                         if let Some(opposite_type) = atom.type_ {
                             if opposite_type != *type_ {
                                 panic!("Type mismatch in guard");
                             }
                         } else {
-                            let atom = self.definitions.get_mut(def).unwrap();
                             atom.type_ = Some(*type_);
                         }
                     }
                     GuardSource::Placeholder(name) => {
                         for link in free_links {
                             if link.name == *name {
-                                let atom = self.atoms.get_mut(&link.this.atom_id()).unwrap();
-                                atom.args[link.this.index()].opposite_type = Some(*type_);
-                                substitute = Some(GuardSource::AtPortOfAtom(
-                                    link.this.atom_id(),
-                                    link.this.index(),
-                                ));
+                                if let Some((id, idx)) = link.this.id_index() {
+                                    let atom = self.atoms.get_mut(&id).unwrap();
+                                    atom.args[idx].opposite_type = Some(*type_);
+                                    substitute = Some(GuardSource::AtPortOfAtom(id, idx));
+                                }
                             }
                         }
                         if substitute.is_none() {
@@ -521,18 +566,24 @@ impl Rule {
 
         for connector in &connectors {
             let atom = self.atoms.get_mut(connector).unwrap();
-            let left = atom.args[0].opposite.unwrap();
-            let right = atom.args[1].opposite.unwrap();
+            let left = atom.args[0].opposite;
+            let right = atom.args[1].opposite;
             let name = atom.args[1].name.clone();
 
-            if !self.definitions.contains_key(&left.atom_id()) {
-                let atom = self.atoms.get_mut(&left.atom_id()).unwrap();
-                atom.args[left.index()].opposite = Some(right);
-                atom.args[left.index()].name = name.clone();
+            if let Some((id, idx)) = left.id_index() {
+                if !self.definitions.contains_key(&id) {
+                    let atom = self.atoms.get_mut(&id).unwrap();
+                    atom.args[idx].opposite = right;
+                    atom.args[idx].name = name.clone();
+                }
             }
-            if !self.definitions.contains_key(&right.atom_id()) {
-                let atom = self.atoms.get_mut(&right.atom_id()).unwrap();
-                atom.args[right.index()].opposite = Some(left);
+
+            if let Some((id, idx)) = right.id_index() {
+                if !self.definitions.contains_key(&id) {
+                    let atom = self.atoms.get_mut(&id).unwrap();
+                    atom.args[idx].opposite = left;
+                    atom.args[idx].name = name.clone();
+                }
             }
 
             self.atoms.remove(connector);
@@ -542,5 +593,37 @@ impl Rule {
                 body.atoms.remove(connector);
             }
         }
+    }
+}
+
+impl Display for Rule {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for id in &self.membranes[&self.head].atoms {
+            let atom = &self.atoms[id];
+            write!(f, "[{}]{}(", id, atom.name)?;
+            let args = atom
+                .args
+                .iter()
+                .map(|link| link.name.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            write!(f, "{}),", args)?;
+        }
+
+        write!(f, " :- ")?;
+
+        for id in &self.membranes[&self.body].atoms {
+            let atom = &self.atoms[id];
+            write!(f, "[{}]{}(", id, atom.name)?;
+            let args = atom
+                .args
+                .iter()
+                .map(|link| link.name.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            write!(f, "{}),", args)?;
+        }
+
+        write!(f, ".")
     }
 }
