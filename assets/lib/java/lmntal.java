@@ -6,6 +6,7 @@ interface Rule {
 }
 
 enum DataType {
+    PLAIN,
     INT,
     FLOAT,
     CHAR,
@@ -13,15 +14,25 @@ enum DataType {
 }
 
 class Atom {
-    private String name;
     private final Atom[] args;
+    private String name;
     private Object data;
     private DataType type;
     private boolean isRemoved;
 
     public Atom(String name, int arity) {
         this.name = name;
+        this.type = DataType.PLAIN;
         this.args = new Atom[arity];
+    }
+
+    public static boolean equals(Atom... atoms) {
+        for (int i = 0; i < atoms.length - 1; i++) {
+            if (atoms[i] != atoms[i + 1]) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public boolean isRemoved() {
@@ -63,12 +74,12 @@ class Atom {
         args[index] = atom;
     }
 
-    public int getInt() {
-        return (int) data;
+    public long getInt() {
+        return (long) data;
     }
 
-    public float getFloat() {
-        return (float) data;
+    public double getFloat() {
+        return (double) data;
     }
 
     public char getChar() {
@@ -79,35 +90,39 @@ class Atom {
         return (String) data;
     }
 
+    public boolean isPlain() {
+        return type == DataType.PLAIN;
+    }
+
     public boolean isInt() {
         return type == DataType.INT;
+    }
+
+    public void setInt(long value) {
+        this.data = value;
+        this.type = DataType.INT;
     }
 
     public boolean isFloat() {
         return type == DataType.FLOAT;
     }
 
-    public boolean isChar() {
-        return type == DataType.CHAR;
-    }
-
-    public boolean isString() {
-        return type == DataType.STRING;
-    }
-
-    public void setInt(int value) {
-        this.data = value;
-        this.type = DataType.INT;
-    }
-
-    public void setFloat(float value) {
+    public void setFloat(double value) {
         this.data = value;
         this.type = DataType.FLOAT;
+    }
+
+    public boolean isChar() {
+        return type == DataType.CHAR;
     }
 
     public void setChar(char value) {
         this.data = value;
         this.type = DataType.CHAR;
+    }
+
+    public boolean isString() {
+        return type == DataType.STRING;
     }
 
     public void setString(String value) {
@@ -119,26 +134,25 @@ class Atom {
         return args.length;
     }
 
-    public static boolean equals(Atom... atoms) {
-        for (int i = 0; i < atoms.length - 1; i++) {
-            if (atoms[i] != atoms[i + 1]) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     public void removeAt(int index) {
         AtomStore.INSTANCE.removeAtom(args[index]);
         args[index] = null;
     }
+
+    @Override
+    public String toString() {
+        return switch (type) {
+            case INT -> Long.toString(getInt());
+            case FLOAT -> Double.toString(getFloat());
+            default -> name;
+        };
+    }
 }
 
 class AtomStore {
+    public static AtomStore INSTANCE = new AtomStore();
     private final HashMap<Integer, List<Atom>> atoms;
     private final HashMap<Integer, Queue<Atom>> reusableAtoms;
-
-    public static AtomStore INSTANCE = new AtomStore();
 
     public AtomStore() {
         this.atoms = new HashMap<>();
@@ -182,26 +196,36 @@ class AtomStore {
                 .collect(Collectors.toList());
     }
 
-    public void printAtoms() {
-        for (var arity : atoms.keySet()) {
-            for (var atom : atoms.get(arity)) {
-                if (atom.isRemoved()) {
+    public String dumpAtoms() {
+        var sb = new StringBuilder();
+        var visited = new HashSet<Atom>();
+        for (var atoms_by_arity : atoms.values()) {
+            for (var atom : atoms_by_arity) {
+                if (!atom.isPlain() || atom.isRemoved() || visited.contains(atom)) {
                     continue;
                 }
-                System.out.print(atom.getName());
-                System.out.print("(");
-                for (int i = 0; i < atom.getArity(); i++) {
-                    if (atom.at(i) == null) {
-                        System.out.print("null");
-                    } else {
-                        System.out.print(atom.at(i).getName());
-                    }
-                    if (i != atom.getArity() - 1) {
-                        System.out.print(", ");
-                    }
-                }
-                System.out.println(")");
+                dfsDump(atom, sb, visited);
             }
+        }
+        return sb.toString();
+    }
+
+    private void dfsDump(Atom cur, StringBuilder sb, HashSet<Atom> visited) {
+        visited.add(cur);
+        sb.append(cur.toString());
+        sb.append("(");
+        var count = 0;
+        for (int i = 0; i < cur.getArity(); i++) {
+            var atom = cur.at(i);
+            if (atom != null && !visited.contains(atom)) {
+                dfsDump(atom, sb, visited);
+                sb.append(",");
+                count++;
+            }
+        }
+        sb.deleteCharAt(sb.length() - 1);
+        if (count != 0) {
+            sb.append(")");
         }
     }
 }

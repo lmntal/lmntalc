@@ -152,7 +152,6 @@ impl PythonBackend {
         let rules = generator.rules.len();
 
         code.push_str(&format!("    rule_fail = {} * [False]\n", rules));
-        code.push_str("    all_fail = False\n");
         code.push_str("    rules = [\n");
 
         for rule in &generator.rules {
@@ -163,13 +162,13 @@ impl PythonBackend {
 
         let rules = rules - 1;
         code.push_str(&format!(
-            r#"    while not all_fail:
+            r#"    while not all(rule_fail):
         rand = random.randint(0, {rules})
-        rule_fail[rand] = not rules[rand]()
-        all_fail = True
-        for fail in rule_fail:
-            all_fail &= fail
-    print_atoms()
+        if rules[rand]():
+            rule_fail = 5 * [False]
+        else:
+            rule_fail[rand] = True
+    dump_atoms()
 
 if __name__ == "__main__":
     main()

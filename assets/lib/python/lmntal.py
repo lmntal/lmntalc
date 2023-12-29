@@ -37,12 +37,31 @@ class AtomStore:
             if atom.name == name and atom.arity == arity:
                 yield atom
 
-    def print(self):
-        for arity, atoms in self.store.items():
+    def dump(self) -> str:
+        visited = set()
+        res = ""
+        for _, atoms in self.store.items():
             for atom in atoms:
-                if atom.removed:
+                if not atom.is_plain or atom.removed or (atom in visited):
                     continue
-                print(atom)
+                res += self.__dfs_dump(atom, visited, res)
+        return res
+
+    def __dfs_dump(self, atom: Atom, visited: set[Atom], string: str) -> str:
+        visited.add(atom)
+        string += str(atom)
+        string += "("
+        count = 0
+        for i in range(atom.arity):
+            atom2 = atom.at(i)
+            if atom2 is not None and atom2 not in visited:
+                string = self.__dfs_dump(atom2, visited, string)
+                string += ","
+                count += 1
+        string = string[:-1]
+        if count != 0:
+            string += ")"
+        return string
 
 
 class Atom:
@@ -60,7 +79,9 @@ class Atom:
         self.removed = False
 
     def __str__(self):
-        return f"name: {self.name} arity: {self.arity} data: {self.data}"
+        if isinstance(self.data, int) or isinstance(self.data, float):
+            return f"{self.data}"
+        return f"{self.name}"
 
     def at(self, index: int) -> Atom:
         return self.args[index]
@@ -68,6 +89,9 @@ class Atom:
     def remove_at(self, index: int):
         self.args[index].removed = True
         self.args[index] = None
+
+    def is_plain(self) -> bool:
+        return self.data is None
 
     def is_int(self) -> bool:
         return self.data is not None and isinstance(self.data, int)
@@ -104,6 +128,7 @@ def link(atom: Atom, index: int, atom2: Atom, index2: int):
     atom.args[index] = atom2
     atom2.args[index2] = atom
 
+
 def relink(atom: Atom, index: int, atom2: Atom, index2: int):
     atom3 = atom.args[index]
     index3 = 0
@@ -113,6 +138,8 @@ def relink(atom: Atom, index: int, atom2: Atom, index2: int):
             break
     link(atom3, index3, atom2, index2)
 
-def print_atoms():
-    atom_list.print()
+
+def dump_atoms():
+    print(atom_list.dump())
+
 

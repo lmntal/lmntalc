@@ -1,5 +1,5 @@
-    static void removeAtom(Atom atom) {
-        AtomStore.INSTANCE.removeAtom(atom);
+    static Atom createAtom(String name, int arity) {
+        return AtomStore.INSTANCE.createAtom(name, arity);
     }
 
     static void link(Atom atom1, int index1, Atom atom2, int index2) {
@@ -24,6 +24,10 @@
         return AtomStore.INSTANCE.findAtom(name, arity);
     }
 
-    static void printAtoms() {
-        AtomStore.INSTANCE.printAtoms();
+    static void dumpAtoms() {
+        System.out.println(AtomStore.INSTANCE.dumpAtoms());
+    }
+
+    interface Rule {
+        boolean apply();
     }

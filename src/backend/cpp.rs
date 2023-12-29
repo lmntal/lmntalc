@@ -166,9 +166,11 @@ impl CppBackend {
 
         let rules = generator.rules.len();
 
-        code.push_str(&format!("  bool rule_fail[{}] = {{}};\n", rules));
-        code.push_str("  auto all_fail = false;\n");
-        code.push_str(&format!("  rule rules[{}] = {{\n", generator.rules.len()));
+        code.push_str(&format!("  std::bitset<{}> rule_fail;\n", rules));
+        code.push_str(&format!(
+            "  constexpr rule rules[{}] = {{\n",
+            generator.rules.len()
+        ));
 
         for rule in &generator.rules {
             code.push_str(&format!("    {},\n", rule.name));
@@ -178,15 +180,15 @@ impl CppBackend {
 
         code.push_str("  std::mt19937 rng(std::random_device{}());\n");
         code.push_str(&format!(
-            r#"  while (!all_fail) {{
-    auto rand = rng() % {rules};
-    rule_fail[rand] = !rules[rand]();
-    all_fail = true;
-    for (auto fail : rule_fail) {{
-      all_fail &= fail;
+            r#"  while (!rule_fail.all()) {{
+    auto const rand = rng() % {rules};
+    if (rules[rand]()) {{
+      rule_fail.reset();
+    }} else {{
+      rule_fail.set(rand);
     }}
   }}
-  print_atoms();
+  dump_atoms();
 "#,
         ));
 

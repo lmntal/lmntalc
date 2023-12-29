@@ -97,9 +97,9 @@ impl JavaBackend {
             }
             LMNtalIR::CheckValue(op) => code.push_str(&print_operation(op)),
             LMNtalIR::DefineTempVar { id, name, ty, op } => {
-                code.push_str(&format!("var temp_{} = createAtom(\"{}\", 1);\n", id, name));
+                code.push_str(&format!("var temp_{} = AtomStore.INSTANCE.createAtom(\"{}\", 1);\n", id, name));
                 code.push_str(&format!(
-                    "{}temp_{}.set_{}({});",
+                    "{}temp_{}.set{}({});",
                     " ".repeat(indent),
                     id,
                     atom_type_to_string(ty),
@@ -163,10 +163,9 @@ impl JavaBackend {
         let rules = generator.rules.len();
 
         code.push_str(&format!(
-            "        var rule_fail = new boolean[{}];\n",
+            "        var rule_fail = new BitSet({});\n",
             rules
         ));
-        code.push_str("        var all_fail = false;\n");
         code.push_str("        var rules = new Rule[]{\n");
 
         for rule in &generator.rules {
@@ -177,15 +176,15 @@ impl JavaBackend {
 
         code.push_str("        Random rng = new Random();\n");
         code.push_str(&format!(
-            r#"        while (!all_fail) {{
+            r#"        while (rule_fail.cardinality() != {rules}) {{
             var rand = rng.nextInt({rules});
-            rule_fail[rand] = !rules[rand].apply();
-            all_fail = true;
-            for (var fail : rule_fail) {{
-            all_fail &= fail;
-            }};
+            if (rules[rand].apply()) {{
+                rule_fail.clear();
+            }} else {{
+                rule_fail.set(rand);
+            }}
         }}
-        printAtoms();
+        dumpAtoms();
 "#,
         ));
 
