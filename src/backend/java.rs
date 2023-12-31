@@ -97,7 +97,10 @@ impl JavaBackend {
             }
             LMNtalIR::CheckValue(op) => code.push_str(&print_operation(op)),
             LMNtalIR::DefineTempVar { id, name, ty, op } => {
-                code.push_str(&format!("var temp_{} = AtomStore.INSTANCE.createAtom(\"{}\", 1);\n", id, name));
+                code.push_str(&format!(
+                    "var temp_{} = AtomStore.INSTANCE.createAtom(\"{}\", 1);\n",
+                    id, name
+                ));
                 code.push_str(&format!(
                     "{}temp_{}.set{}({});",
                     " ".repeat(indent),
@@ -127,27 +130,31 @@ impl JavaBackend {
                     id, from, port, name, arity
                 ));
             }
-            LMNtalIR::AtomEquality {
-                id_port_list: ids,
-                eq,
-            } => {
-                if *eq {
-                    code.push_str("if (equals(");
-                } else {
-                    code.push_str("if (!equals(");
-                }
-                for (i, (id, port)) in ids.iter().enumerate() {
-                    if i != 0 {
-                        code.push_str(", ");
-                    }
-                    code.push_str(&format!("atom_{}.at({})", id, port,));
-                }
-
-                code.push_str(")) return false;\n");
+            LMNtalIR::GetHyperlinkAtPort { id, from, port } => {
+                code.push_str(&format!(
+                    "var hl_{} = getHyperlinkAtPort(atom_{}, {});",
+                    id, from, port
+                ));
             }
             LMNtalIR::RemoveAtomAt { id, port } => {
                 code.push_str(&format!("atom_{}.removeAt({});", id, port));
             }
+            LMNtalIR::CreateHyperlink { id, name } => {
+                code.push_str(&format!(
+                    "var hl_{} = AtomStore.INSTANCE.createHyperlink(\"{}\");",
+                    id, name
+                ));
+            }
+            LMNtalIR::LinkToHyperlink { atom, hyperlink } => {
+                code.push_str(&format!("hl_{}.add({});", hyperlink.id(), fmt(atom)));
+            }
+            LMNtalIR::RemoveFromHyperlink { atom, hyperlink } => {
+                code.push_str(&format!("hl_{}.remove({});", hyperlink.id(), fmt(atom)));
+            }
+            LMNtalIR::FuseHyperlink { into, from } => {
+                code.push_str(&format!("hl_{}.fuse(hl_{});", into.id(), from.id()));
+            }
+            _ => unreachable!(),
         }
         code
     }
@@ -162,10 +169,7 @@ impl JavaBackend {
 
         let rules = generator.rules.len();
 
-        code.push_str(&format!(
-            "        var rule_fail = new BitSet({});\n",
-            rules
-        ));
+        code.push_str(&format!("        var rule_fail = new BitSet({});\n", rules));
         code.push_str("        var rules = new Rule[]{\n");
 
         for rule in &generator.rules {
@@ -244,11 +248,15 @@ impl JavaBackend {
                 code.push_str(&self.pretty_print(ir, *indent));
                 code.push_str(&format!(" if (atom_{} == null) continue;\n", id));
             }
+            LMNtalIR::GetHyperlinkAtPort { id, .. } => {
+                code.push_str(&self.pretty_print(ir, *indent));
+                code.push_str(&format!(" if (hl_{} == null) continue;\n", id));
+            }
             LMNtalIR::AtomEquality { id_port_list, eq } => {
                 if *eq {
-                    code.push_str(&format!("{}if (equals(", " ".repeat(*indent)));
+                    code.push_str(&format!("{}if (!Main.equals(", " ".repeat(*indent)));
                 } else {
-                    code.push_str(&format!("{}if (!equals(", " ".repeat(*indent)));
+                    code.push_str(&format!("{}if (Main.equals(", " ".repeat(*indent)));
                 }
                 for (i, (id, port)) in id_port_list.iter().enumerate() {
                     if i != 0 {

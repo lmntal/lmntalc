@@ -1,3 +1,11 @@
+    static Hyperlink getHyperlinkAtPort(Atom atom, int port) {
+        var hl = atom.at(port);
+        if (hl instanceof Hyperlink) {
+            return (Hyperlink) hl;
+        }
+        return null;
+    }
+
     static Atom createAtom(String name, int arity) {
         return AtomStore.INSTANCE.createAtom(name, arity);
     }
@@ -20,7 +28,16 @@
         link(atom3, index3, atom2, index2);
     }
 
-    static Iterable<Atom> findAtom(String name, int arity) {
+    static boolean equals(Atom... atoms) {
+        for (int i = 0; i < atoms.length - 1; i++) {
+            if (atoms[i] != atoms[i + 1]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static Iterable<NormalAtom> findAtom(String name, int arity) {
         return AtomStore.INSTANCE.findAtom(name, arity);
     }
 

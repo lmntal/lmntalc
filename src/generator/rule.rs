@@ -8,8 +8,8 @@ use petgraph::{stable_graph::StableDiGraph, visit::IntoNodeReferences};
 
 use crate::{
     data::{
-        guard::{GuardNode, GuardSource},
-        id::AtomId,
+        guard::{GuardNode, GuardSource, ProcessConstraint},
+        id::{AtomId, HyperlinkId},
         rule::{Rule, RuleLink, RuleLinkArg},
     },
     ir::{self, LMNtalIR, Operation, VarSource},
@@ -122,7 +122,11 @@ fn generate_pattern(
             .neighbors_directed(node, petgraph::Direction::Incoming)
             .collect();
         match neighbors.len() {
-            0 => zero_incoming.push(*weight),
+            0 => {
+                if weight.is_atom() {
+                    zero_incoming.push(weight.id())
+                }
+            }
             1 => {}
             _ => {
                 let neighbors: Vec<_> = neighbors
@@ -140,8 +144,9 @@ fn generate_pattern(
     }
 
     let mut queue = VecDeque::new();
+    let head = rule.head_atoms();
+    let hyperlinks = rule.hyperlinks();
     for atom_id in zero_incoming {
-        let head = rule.head_atoms();
         let atom = head.get(&atom_id).unwrap();
         inst.push(LMNtalIR::FindAtom {
             id: *slot,
@@ -153,41 +158,59 @@ fn generate_pattern(
         *slot += 1;
         for (idx, arg) in atom.args().enumerate() {
             if let RuleLinkArg::Head(arg_id, _) = arg.opposite {
-                queue.push_back((atom_id, idx, arg_id));
+                if hyperlinks.contains_key(&arg_id) {
+                    inst.push(LMNtalIR::GetHyperlinkAtPort {
+                        id: *slot,
+                        from: symbol_table[&atom_id],
+                        port: idx,
+                    });
+                    symbol_table.insert(arg_id, *slot);
+                    *slot += 1;
+                    remove_queue.push(LMNtalIR::RemoveFromHyperlink {
+                        atom: VarSource::Head(symbol_table[&atom_id], idx),
+                        hyperlink: VarSource::Head(symbol_table[&arg_id], 0),
+                    });
+                } else {
+                    // ignore hyperlinks, they are handled separately
+                    queue.push_back((atom_id, idx, arg_id));
+                }
             }
         }
 
+        // Traverse the graph and create atoms
         while let Some((atom_id, idx, id)) = queue.pop_back() {
             if symbol_table.contains_key(&id) {
                 continue;
             }
-            let atom = head.get(&id).unwrap();
-            inst.push(LMNtalIR::GetAtomAtPort {
-                id: *slot,
-                from: symbol_table[&atom_id],
-                port: idx,
-                name: atom.name().to_string(),
-                arity: atom.args().count(),
-            });
-            remove_queue.push(LMNtalIR::RemoveAtom { id: *slot });
-            symbol_table.insert(id, *slot);
-            *slot += 1;
-            for (idx, arg) in atom.args().enumerate() {
-                if let RuleLinkArg::Head(arg_id, _) = arg.opposite {
-                    queue.push_back((id, idx, arg_id));
+            if let Some(atom) = head.get(&id) {
+                inst.push(LMNtalIR::GetAtomAtPort {
+                    id: *slot,
+                    from: symbol_table[&atom_id],
+                    port: idx,
+                    name: atom.name().to_string(),
+                    arity: atom.args().count(),
+                });
+                remove_queue.push(LMNtalIR::RemoveAtom { id: *slot });
+                symbol_table.insert(id, *slot);
+                *slot += 1;
+                for (idx, arg) in atom.args().enumerate() {
+                    if let RuleLinkArg::Head(arg_id, _) = arg.opposite {
+                        queue.push_back((id, idx, arg_id));
+                    }
                 }
             }
         }
     }
 
+    // Check atoms with multiple incoming edges
     for atoms in multiple_incoming {
         let mut id_port_list = vec![];
         for (proc, idx) in &atoms {
-            id_port_list.push((symbol_table[proc], *idx));
+            id_port_list.push((symbol_table[&proc.id()], *idx));
         }
         inst.push(LMNtalIR::AtomEquality {
             id_port_list,
-            eq: true,
+            eq: true, // they should be equal
         });
     }
 
@@ -208,14 +231,15 @@ fn generate_case(
     for (atom_id, atom) in rule.head_atoms() {
         for arg in atom.args() {
             match arg.opposite {
-                RuleLinkArg::Head(..) => {}
                 RuleLinkArg::None => {
                     if let Some(ty) = arg.opposite_type {
-                        condition.push(LMNtalIR::CheckType {
-                            id: symbol_table[&atom_id],
-                            port: arg.this.index().unwrap(),
-                            ty,
-                        });
+                        if ty != ProcessConstraint::Hyperlink {
+                            condition.push(LMNtalIR::CheckType {
+                                id: symbol_table[&atom_id],
+                                port: arg.this.index().unwrap(),
+                                ty,
+                            });
+                        }
                     }
                     remove_queue.push(LMNtalIR::RemoveAtomAt {
                         id: symbol_table[&atom_id],
@@ -224,11 +248,14 @@ fn generate_case(
                 }
                 _ => {
                     if let Some(ty) = arg.opposite_type {
-                        condition.push(LMNtalIR::CheckType {
-                            id: symbol_table[&atom_id],
-                            port: arg.this.index().unwrap(),
-                            ty,
-                        });
+                        // hyperlinks are checked at pattern matching
+                        if ty != ProcessConstraint::Hyperlink {
+                            condition.push(LMNtalIR::CheckType {
+                                id: symbol_table[&atom_id],
+                                port: arg.this.index().unwrap(),
+                                ty,
+                            });
+                        }
                     }
                 }
             }
@@ -255,32 +282,54 @@ fn generate_case(
         }
     }
 
-    let mut adj: HashMap<_, HashMap<_, usize>> = HashMap::new();
+    let mut link_queue = vec![];
 
-    for (i, atom) in rule.body_atoms() {
+    for (atom_id, atom) in rule.body_atoms() {
         body.push(LMNtalIR::CreateAtom {
             id: *slot,
             name: atom.name().to_string(),
             arity: atom.args().count(),
             data: atom.data().clone(),
         });
-
-        symbol_table.insert(i, *slot);
+        symbol_table.insert(atom_id, *slot);
         *slot += 1;
+    }
 
-        for (j, arg) in atom.args().enumerate() {
-            if let RuleLinkArg::Body(arg, _) = arg.opposite {
-                adj.entry(i).or_default().insert(arg, j);
-            }
+    for (hl_id, hl) in rule.hyperlinks() {
+        if !hl.first_in_head() {
+            // only create hyperlinks that are not in the head
+            body.push(LMNtalIR::CreateHyperlink {
+                id: *slot,
+                name: hl.name().to_string(),
+            });
+            symbol_table.insert(hl_id, *slot);
+            *slot += 1;
         }
     }
 
-    for (from, list) in &adj {
-        for to in list.keys() {
-            body.push(LMNtalIR::Link {
-                src: ir::VarSource::Body(symbol_table[from], adj[&from][&to]),
-                dst: ir::VarSource::Body(symbol_table[to], adj[&to][&from]),
-            });
+    for (this_id, atom) in rule.body_atoms() {
+        for (this_port, arg) in atom.args().enumerate() {
+            match arg.opposite {
+                RuleLinkArg::Body(op, port) => {
+                    link_queue.push({
+                        LMNtalIR::Link {
+                            src: VarSource::Body(symbol_table[&this_id], this_port),
+                            dst: VarSource::Body(symbol_table[&op], port),
+                        }
+                    });
+                }
+                RuleLinkArg::Head(op, port) => {
+                    if rule.hyperlinks().contains_key(&op) {
+                        link_queue.push({
+                            LMNtalIR::LinkToHyperlink {
+                                atom: VarSource::Body(symbol_table[&this_id], this_port),
+                                hyperlink: VarSource::Body(symbol_table[&op], port),
+                            }
+                        });
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
@@ -292,15 +341,18 @@ fn generate_case(
                 _ => {
                     let link = arg.clone();
                     if let Some(ir) = create_link(&link, symbol_table) {
-                        body.push(ir)
+                        link_queue.push(ir)
                     }
                 }
             }
         }
     }
 
+    for ir in link_queue {
+        body.push(ir);
+    }
+
     for ir in remove_queue {
-        // body.push(LMNtalIR::RemoveAtom { id: *atom });
         body.push(ir);
     }
 
@@ -430,28 +482,56 @@ impl Display for RuleIR {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Node {
+    Atom(AtomId),
+    Hyperlink(HyperlinkId),
+}
+
+impl Node {
+    fn is_atom(&self) -> bool {
+        matches!(self, Node::Atom(_))
+    }
+
+    fn id(&self) -> AtomId {
+        match self {
+            Node::Atom(id) => *id,
+            Node::Hyperlink(id) => *id,
+        }
+    }
+}
+
 /// Construct a directed graph from the pattern, with atoms as nodes and links as edges
 ///
 /// The graph may contain cycles, which will be resolved by `tarjan_scc`
-fn construct_graph(rule: &Rule) -> StableDiGraph<AtomId, usize> {
+fn construct_graph(rule: &Rule) -> StableDiGraph<Node, usize> {
     let mut g = StableDiGraph::default();
 
     let mut map = HashMap::new();
 
     for (i, _) in rule.head_atoms() {
-        let idx = g.add_node(i);
+        let idx = g.add_node(Node::Atom(i));
         map.insert(i, idx);
+    }
+
+    for (i, hl) in rule.hyperlinks() {
+        if hl.first_in_head() {
+            let idx = g.add_node(Node::Hyperlink(i));
+            map.insert(i, idx);
+        }
     }
 
     for (id, atom) in rule.head_atoms() {
         for (idx, arg) in atom.args().enumerate() {
             if let RuleLinkArg::Head(op_id, _) = arg.opposite {
                 let from = *map.get(&id).unwrap();
-                let to = *map.get(&op_id).unwrap();
-                if id < op_id && !g.contains_edge(from, to) {
-                    g.add_edge(from, to, idx);
-                } else if id > op_id && !g.contains_edge(to, from) {
-                    g.add_edge(to, from, idx);
+                if let Some(to) = map.get(&op_id) {
+                    // maybe a hyperlink
+                    if id < op_id && !g.contains_edge(from, *to) {
+                        g.add_edge(from, *to, idx);
+                    } else if id > op_id && !g.contains_edge(*to, from) {
+                        g.add_edge(*to, from, idx);
+                    }
                 }
             }
         }

@@ -27,11 +27,15 @@ pub(crate) trait Storage {
     fn add_membrane(&mut self, id: MembraneId, membrane: Membrane);
     /// Add a new rule to the storage and return its id
     fn add_rule(&mut self, rule: Rule, parent: MembraneId) -> RuleId;
-    /// Add a new hyperlink to the storage and return its id
-    fn add_hyperlink(&mut self, hyperlink: HyperLink) -> HyperLinkId;
+    /// Add a new hyperlink to the storage and return its id.
+    ///
+    /// if the hyperlink already exists, return its id
+    fn add_hyperlink(&mut self, name: &str) -> HyperlinkId;
 
     fn get_atom_arg_len(&self, id: AtomId) -> usize;
+    fn get_hyperlink_arg_len(&self, id: HyperlinkId) -> usize;
     fn append_atom_arg(&mut self, id: AtomId, link: Link);
+    fn append_hyperlink_arg(&mut self, id: HyperlinkId, link: Link);
 }
 
 #[derive(Debug)]
@@ -257,7 +261,27 @@ fn visit_atom(
                     name, hyperlink, ..
                 } => {
                     if *hyperlink {
-                        unimplemented!("hyperlink")
+                        let name = format!("!{}", name);
+                        let hl_id = store.add_hyperlink(&name);
+                        let temp_name = store.temp_link_name();
+
+                        let length = store.get_hyperlink_arg_len(hl_id);
+                        let this_pair = (id, idx);
+                        let hl_pair = (hl_id, length);
+                        let link_for_inner = Link {
+                            name: temp_name.clone(),
+                            this: hl_pair,
+                            opposite: Some(this_pair),
+                        };
+                        store.append_hyperlink_arg(hl_id, link_for_inner);
+
+                        let link = Link {
+                            name: temp_name,
+                            this: this_pair,
+                            opposite: Some(hl_pair),
+                        };
+
+                        links.push(link);
                     } else {
                         let link = Link {
                             name: name.clone(),

@@ -5,7 +5,7 @@ use std::fmt::Display;
 use crate::transform::{SolveResult, Storage, TransformError};
 
 use super::guard::{GuardNode, GuardSource, ProcessConstraint};
-use super::{guard::Guard, Atom, Data, HyperLink, Link, Membrane};
+use super::{guard::Guard, Atom, Data, Link, Membrane};
 
 use super::id::*;
 
@@ -18,6 +18,14 @@ pub struct RuleAtom {
     variable: bool,
     type_: Option<ProcessConstraint>,
     hyperlink: bool,
+    args: Vec<RuleLink>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct RuleHyperlink {
+    name: String,
+    first_in_head: bool,
     args: Vec<RuleLink>,
 }
 
@@ -43,7 +51,7 @@ pub struct Rule {
 
     membranes: HashMap<MembraneId, Membrane>,
     atoms: HashMap<AtomId, RuleAtom>,
-    hyperlinks: HashMap<HyperLinkId, HyperLink>,
+    hyperlinks: HashMap<HyperlinkId, RuleHyperlink>,
     definitions: HashMap<AtomId, RuleAtom>,
     def_name: HashMap<String, AtomId>,
 
@@ -73,6 +81,12 @@ pub struct RuleLink {
     pub opposite: RuleLinkArg,
 }
 
+impl RuleHyperlink {
+    pub(crate) fn first_in_head(&self) -> bool {
+        self.first_in_head
+    }
+}
+
 impl RuleAtom {
     pub fn name(&self) -> &str {
         &self.name
@@ -91,11 +105,21 @@ impl RuleAtom {
     }
 }
 
+impl RuleHyperlink {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn args(&self) -> impl Iterator<Item = &RuleLink> {
+        self.args.iter()
+    }
+}
+
 impl RuleLink {
-    fn from(link: &Link, head: bool) -> Self {
+    fn from(link: &Link, this_in_head: bool, op_in_head: bool) -> Self {
         Self {
             name: link.name.clone(),
-            this: if head {
+            this: if this_in_head {
                 RuleLinkArg::Head(link.this.0, link.this.1)
             } else {
                 RuleLinkArg::Body(link.this.0, link.this.1)
@@ -103,7 +127,7 @@ impl RuleLink {
             opposite_type: None,
             opposite: match &link.opposite {
                 Some(opposite) => {
-                    if head {
+                    if op_in_head {
                         RuleLinkArg::Head(opposite.0, opposite.1)
                     } else {
                         RuleLinkArg::Body(opposite.0, opposite.1)
@@ -210,7 +234,20 @@ impl Storage for Rule {
             args: atom
                 .args
                 .iter()
-                .map(|link| RuleLink::from(link, !self.head_parsed))
+                .map(|link| {
+                    let head = {
+                        if let Some((id, _)) = link.opposite {
+                            if let Some(hl) = self.hyperlinks.get(&id) {
+                                hl.first_in_head
+                            } else {
+                                !self.head_parsed
+                            }
+                        } else {
+                            !self.head_parsed
+                        }
+                    };
+                    RuleLink::from(link, !self.head_parsed, head)
+                })
                 .collect(),
         };
         self.atoms.insert(id, atom);
@@ -221,14 +258,19 @@ impl Storage for Rule {
         unimplemented!("Generating rules in rules is not supported")
     }
 
-    fn add_hyperlink(&mut self, hyperlink: HyperLink) -> super::HyperLinkId {
+    fn add_hyperlink(&mut self, name: &str) -> super::HyperlinkId {
         for (id, link_) in &mut self.hyperlinks {
-            if link_.name == hyperlink.name {
+            if link_.name == name {
                 return *id;
             }
         }
 
         let id = self.id_generator.next_hyperlink_id();
+        let hyperlink = RuleHyperlink {
+            name: name.to_owned(),
+            first_in_head: !self.head_parsed,
+            args: vec![],
+        };
         self.hyperlinks.insert(id, hyperlink);
         id
     }
@@ -237,12 +279,24 @@ impl Storage for Rule {
         self.atoms.get(&id).map_or(0, |atom| atom.args.len())
     }
 
+    fn get_hyperlink_arg_len(&self, id: HyperlinkId) -> usize {
+        self.hyperlinks.get(&id).map_or(0, |link| link.args.len())
+    }
+
     fn append_atom_arg(&mut self, id: AtomId, link: Link) {
-        self.atoms
+        self.atoms.get_mut(&id).unwrap().args.push(RuleLink::from(
+            &link,
+            !self.head_parsed,
+            !self.head_parsed,
+        ));
+    }
+
+    fn append_hyperlink_arg(&mut self, id: HyperlinkId, link: Link) {
+        self.hyperlinks
             .get_mut(&id)
             .unwrap()
             .args
-            .push(RuleLink::from(&link, !self.head_parsed));
+            .push(RuleLink::from(&link, !self.head_parsed, !self.head_parsed));
     }
 }
 
@@ -279,6 +333,13 @@ impl Rule {
         self.definitions
             .iter()
             .map(|(id, atom)| (*id, atom))
+            .collect()
+    }
+
+    pub(crate) fn hyperlinks(&self) -> HashMap<HyperlinkId, &RuleHyperlink> {
+        self.hyperlinks
+            .iter()
+            .map(|(id, link)| (*id, link))
             .collect()
     }
 
@@ -371,7 +432,11 @@ impl Rule {
         for atom_id in &membrane.atoms {
             let atom = self.atoms.get_mut(atom_id).unwrap();
             for link in atom.args.iter_mut() {
-                if link.opposite.is_none() {
+                if let Some(id) = link.opposite.atom_id() {
+                    if self.hyperlinks.contains_key(&id) {
+                        link.opposite_type = Some(ProcessConstraint::Hyperlink);
+                    }
+                } else {
                     if let Some(def_id) = self.def_name.get(&link.name) {
                         link.opposite = RuleLinkArg::Temp(*def_id, 0);
                     }

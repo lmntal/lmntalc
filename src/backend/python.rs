@@ -115,27 +115,28 @@ impl PythonBackend {
                     id, from, port, name, arity
                 ));
             }
-            LMNtalIR::AtomEquality {
-                id_port_list: ids,
-                eq,
-            } => {
-                if *eq {
-                    code.push_str("if equals(");
-                } else {
-                    code.push_str("if not equals(");
-                }
-                for (i, (id, port)) in ids.iter().enumerate() {
-                    if i != 0 {
-                        code.push_str(", ");
-                    }
-                    code.push_str(&format!("atom_{}.at({})", id, port,));
-                }
-
-                code.push_str("):\n    return False\n");
+            LMNtalIR::GetHyperlinkAtPort { id, from, port } => {
+                code.push_str(&format!(
+                    "hl_{} = get_hyperlink_at_port(atom_{}, {})",
+                    id, from, port
+                ));
             }
             LMNtalIR::RemoveAtomAt { id, port } => {
                 code.push_str(&format!("atom_{}.remove_at({})", id, port));
             }
+            LMNtalIR::CreateHyperlink { id, name } => {
+                code.push_str(&format!("hl_{} = create_hyperlink(\"{}\")", id, name));
+            }
+            LMNtalIR::LinkToHyperlink { atom, hyperlink } => {
+                code.push_str(&format!("hl_{}.add({})", hyperlink.id(), fmt(atom)));
+            }
+            LMNtalIR::RemoveFromHyperlink { atom, hyperlink } => {
+                code.push_str(&format!("hl_{}.remove({})", hyperlink.id(), fmt(atom)));
+            }
+            LMNtalIR::FuseHyperlink { into, from } => {
+                code.push_str(&format!("hl_{}.fuse(hl_{})", into.id(), from.id()));
+            }
+            _ => unreachable!(),
         }
         code
     }
@@ -165,7 +166,7 @@ impl PythonBackend {
             r#"    while not all(rule_fail):
         rand = random.randint(0, {rules})
         if rules[rand]():
-            rule_fail = 5 * [False]
+            rule_fail = {rules} * [False]
         else:
             rule_fail[rand] = True
     dump_atoms()
@@ -227,11 +228,20 @@ if __name__ == "__main__":
                     " ".repeat(*indent + 4)
                 ));
             }
+            LMNtalIR::GetHyperlinkAtPort { id, .. } => {
+                code.push_str(&self.print_ir(ir, *indent));
+                code.push_str(&format!(
+                    "\n{}if not hl_{}:\n{}continue\n",
+                    " ".repeat(*indent),
+                    id,
+                    " ".repeat(*indent + 4)
+                ));
+            }
             LMNtalIR::AtomEquality { id_port_list, eq } => {
                 if *eq {
-                    code.push_str(&format!("{}if equals(", " ".repeat(*indent)));
-                } else {
                     code.push_str(&format!("{}if not equals(", " ".repeat(*indent)));
+                } else {
+                    code.push_str(&format!("{}if equals(", " ".repeat(*indent)));
                 }
                 for (i, (id, port)) in id_port_list.iter().enumerate() {
                     if i != 0 {

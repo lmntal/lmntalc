@@ -21,7 +21,7 @@ pub struct Program {
     membranes: HashMap<MembraneId, Membrane>,
     rules: HashMap<RuleId, Rule>,
     atoms: HashMap<AtomId, Atom>,
-    hyperlinks: HashMap<HyperLinkId, HyperLink>,
+    hyperlinks: HashMap<HyperlinkId, Hyperlink>,
 
     id_generator: id::IdGenerator,
 }
@@ -47,8 +47,8 @@ impl Program {
         })
     }
 
-    pub fn hyperlinks(&self) -> Vec<&HyperLink> {
-        self.hyperlinks.values().collect()
+    pub fn hyperlinks(&self) -> &HashMap<HyperlinkId, Hyperlink> {
+        &self.hyperlinks
     }
 
     pub fn rules(&self, membrane: MembraneId) -> Vec<Rule> {
@@ -83,7 +83,7 @@ pub enum Process {
     /// The first usize is the id of the parent membrane
     ///
     /// The second usize is the id of the hyperlink
-    Hyperlink(HyperLinkId),
+    Hyperlink(HyperlinkId),
 }
 
 #[allow(dead_code)]
@@ -113,11 +113,11 @@ pub struct Link {
     pub opposite: Option<(AtomId, usize)>,
 }
 
+/// A hyperlink is treated as a special atom
 #[derive(Debug, Default, Clone)]
-pub struct HyperLink {
+pub struct Hyperlink {
     pub name: String,
-    pub this: (AtomId, usize),
-    pub others: Vec<(AtomId, usize)>,
+    pub args: Vec<Link>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -260,13 +260,17 @@ impl Storage for Program {
         id
     }
 
-    fn add_hyperlink(&mut self, hyperlink: HyperLink) -> HyperLinkId {
+    fn add_hyperlink(&mut self, name: &str) -> HyperlinkId {
         for (id, hyperlink_) in &self.hyperlinks {
-            if hyperlink.name == hyperlink_.name {
+            if name == hyperlink_.name {
                 return *id;
             }
         }
         let id = self.id_generator.next_hyperlink_id();
+        let hyperlink = Hyperlink {
+            name: name.to_string(),
+            ..Default::default()
+        };
         self.hyperlinks.insert(id, hyperlink);
         id
     }
@@ -277,8 +281,20 @@ impl Storage for Program {
         }
     }
 
+    fn append_hyperlink_arg(&mut self, id: HyperlinkId, link: Link) {
+        if let Some(hyperlink) = self.hyperlinks.get_mut(&id) {
+            hyperlink.args.push(link);
+        }
+    }
+
     fn get_atom_arg_len(&self, id: AtomId) -> usize {
         self.atoms.get(&id).map_or(0, |atom| atom.args.len())
+    }
+
+    fn get_hyperlink_arg_len(&self, id: HyperlinkId) -> usize {
+        self.hyperlinks
+            .get(&id)
+            .map_or(0, |hyperlink| hyperlink.args.len())
     }
 }
 

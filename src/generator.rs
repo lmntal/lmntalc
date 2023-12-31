@@ -1,12 +1,15 @@
 pub mod rule;
 
-use std::{collections::HashMap, fmt::Display};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Display,
+};
 
 use owo_colors::OwoColorize;
 
 use crate::{
     data::{Data, Program},
-    ir::LMNtalIR,
+    ir::{self, LMNtalIR},
 };
 
 use self::rule::{RuleGenerator, RuleIR};
@@ -48,31 +51,56 @@ impl Generator {
 
     /// Generate initialization function, e.g. `main()` in most languages
     fn gen_init(&mut self, program: &Program) {
-        let atoms = &program.atoms(program.root());
-        let mut adj = vec![vec![0; atoms.len()]; atoms.len()];
+        let atoms = program.atoms(program.root());
+        let hyperlinks = program.hyperlinks();
+        let mut counter = 0;
+        let mut queue = vec![];
         let mut atom_id_map = HashMap::new();
-        let mut id_atom_map = HashMap::new();
 
-        for (i, (atom_id, _)) in atoms.iter().enumerate() {
-            atom_id_map.insert(atom_id, i);
-            id_atom_map.insert(i, atom_id);
+        for (atom_id, atom) in &atoms {
+            self.create_atom(counter, &atom.name, atom.args.len(), atom.data.clone());
+            atom_id_map.insert(atom_id, counter);
+            counter += 1;
         }
 
-        for (i, (_, atom)) in atoms.iter().enumerate() {
-            self.create_atom(i, &atom.name, atom.args.len(), atom.data.clone());
+        for (hl_id, hl) in hyperlinks {
+            self.create_hyperlink(counter, &hl.name);
+            atom_id_map.insert(hl_id, counter);
+            counter += 1;
+        }
 
-            for (j, arg) in atom.args.iter().enumerate() {
-                if let Some(op) = arg.opposite {
-                    adj[i][atom_id_map[&op.0]] = j + 1;
+        for (this_id, atom) in &atoms {
+            for (this_port, arg) in atom.args.iter().enumerate() {
+                if let Some((op, port)) = arg.opposite {
+                    if hyperlinks.contains_key(&op) {
+                        queue.push(self.hyperlink(
+                            atom_id_map[this_id],
+                            this_port,
+                            atom_id_map[&op],
+                        ));
+                    } else {
+                        queue.push(self.link(
+                            atom_id_map[this_id],
+                            this_port,
+                            atom_id_map[&op],
+                            port,
+                        ));
+                    }
                 }
             }
         }
 
-        for i in 0..atoms.len() {
-            for j in 0..=i {
-                if adj[i][j] != 0 {
-                    self.link(i, adj[i][j] - 1, j, adj[j][i] - 1);
+        let mut exists: HashSet<(_, _)> = HashSet::new();
+
+        while let Some(link) = queue.pop() {
+            if let LMNtalIR::Link { src, dst } = link {
+                if exists.contains(&(src, dst)) {
+                    continue;
                 }
+                exists.insert((dst, src)); // reverse link
+                self.init.push(link);
+            } else {
+                self.init.push(link);
             }
         }
     }
@@ -80,6 +108,13 @@ impl Generator {
 
 /// Functions for generating single LMNtalIR
 impl Generator {
+    fn create_hyperlink(&mut self, id: usize, name: &str) {
+        self.init.push(LMNtalIR::CreateHyperlink {
+            id,
+            name: name.to_string(),
+        });
+    }
+
     fn create_atom(&mut self, id: usize, name: &str, arity: usize, data: Data) {
         self.init.push(LMNtalIR::CreateAtom {
             id,
@@ -89,11 +124,18 @@ impl Generator {
         });
     }
 
-    fn link(&mut self, src: usize, src_port: usize, dst: usize, dst_port: usize) {
-        self.init.push(LMNtalIR::Link {
-            src: crate::ir::VarSource::Head(src, src_port),
-            dst: crate::ir::VarSource::Head(dst, dst_port),
-        });
+    fn link(&mut self, src: usize, src_port: usize, dst: usize, dst_port: usize) -> LMNtalIR {
+        LMNtalIR::Link {
+            src: ir::VarSource::Head(src, src_port),
+            dst: ir::VarSource::Head(dst, dst_port),
+        }
+    }
+
+    fn hyperlink(&mut self, atom: usize, atom_port: usize, hl: usize) -> LMNtalIR {
+        LMNtalIR::LinkToHyperlink {
+            atom: ir::VarSource::Head(atom, atom_port),
+            hyperlink: ir::VarSource::Head(hl, 0),
+        }
     }
 }
 

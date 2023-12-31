@@ -15,6 +15,8 @@ pub mod generator;
 pub mod ir;
 /// Lexer for LMNtal
 pub mod lexing;
+/// This module contains the optimizer for LMNtal IR.
+pub mod optimizer;
 /// Parser for LMNtal
 pub mod parsing;
 /// This module contains the reporter for LMNtal code depending on `ariadne` crate.

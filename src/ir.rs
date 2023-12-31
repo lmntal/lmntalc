@@ -36,6 +36,25 @@ pub enum LMNtalIR {
         dst: VarSource,
     },
 
+    /// Create a new hyperlink with specified name
+    ///
+    /// There is no explicit arity for hyperlink, since it is not fixed
+    CreateHyperlink { id: usize, name: String },
+    /// Add an atom to a hyperlink
+    LinkToHyperlink {
+        atom: VarSource,
+        hyperlink: VarSource,
+    },
+    /// Remove an atom from a hyperlink
+    RemoveFromHyperlink {
+        atom: VarSource,
+        hyperlink: VarSource,
+    },
+    /// Fuse hyperlink `from` into hyperlink `into`, and remove `from`
+    ///
+    /// i.e. `into` will be the new hyperlink with union of atoms in `into` and `from`
+    FuseHyperlink { into: VarSource, from: VarSource },
+
     /// Find atoms with specified name and arity
     ///
     /// This will be translated into a range-based for loop since there may be multiple atoms meet the requirement
@@ -52,6 +71,8 @@ pub enum LMNtalIR {
         name: String,
         arity: usize,
     },
+    /// Get the hyperlink at specified `port` of atom with specified `id`
+    GetHyperlinkAtPort { id: usize, from: usize, port: usize },
     /// Check if atoms at these atom-port pairs are equal
     AtomEquality {
         /// List of atoms and their ports
@@ -126,6 +147,13 @@ impl Display for LMNtalIR {
                 name,
                 arity
             ),
+            LMNtalIR::GetHyperlinkAtPort { id, from, port } => write!(
+                f,
+                "get hyperlink into {} from {} port {}",
+                id.underline().bold(),
+                from.underline().bold(),
+                port,
+            ),
             LMNtalIR::AtomEquality { id_port_list, eq } => {
                 if *eq {
                     write!(f, "atoms are equal:\n\t\t")?;
@@ -158,15 +186,42 @@ impl Display for LMNtalIR {
             LMNtalIR::RemoveAtomAt { id, port } => {
                 write!(f, "remove atom at {} port {}", id.underline().bold(), port)
             }
+            LMNtalIR::CreateHyperlink { id, name } => {
+                write!(
+                    f,
+                    "create hyperlink at {} with name: {}",
+                    id.underline().bold(),
+                    name,
+                )
+            }
+            LMNtalIR::LinkToHyperlink { atom, hyperlink } => {
+                write!(f, "add atom {} to hyperlink {}", atom, hyperlink)
+            }
+            LMNtalIR::RemoveFromHyperlink { atom, hyperlink } => {
+                write!(f, "remove atom {} from hyperlink {}", atom, hyperlink)
+            }
+            LMNtalIR::FuseHyperlink { into, from } => {
+                write!(f, "fuse hyperlink {} into hyperlink {}", from, into)
+            }
         }
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum VarSource {
     Head(usize, usize),
     Definition(usize),
     Body(usize, usize),
+}
+
+impl VarSource {
+    pub fn id(&self) -> usize {
+        match self {
+            VarSource::Head(id, _) => *id,
+            VarSource::Definition(id) => *id,
+            VarSource::Body(id, _) => *id,
+        }
+    }
 }
 
 impl Display for VarSource {

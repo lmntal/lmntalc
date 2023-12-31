@@ -131,27 +131,29 @@ impl CppBackend {
                     id, from, port, name, arity
                 ));
             }
-            LMNtalIR::AtomEquality {
-                id_port_list: ids,
-                eq,
-            } => {
-                if *eq {
-                    code.push_str("if (equals(");
-                } else {
-                    code.push_str("if (!equals(");
-                }
-                for (i, (id, port)) in ids.iter().enumerate() {
-                    if i != 0 {
-                        code.push_str(", ");
-                    }
-                    code.push_str(&format!("atom_{}->at({})", id, port,));
-                }
-
-                code.push_str(")) return false;\n");
+            LMNtalIR::GetHyperlinkAtPort { id, from, port } => {
+                code.push_str(&format!(
+                    "auto hl_{} = get_hlink_at_port(atom_{}, {});",
+                    id, from, port
+                ));
             }
             LMNtalIR::RemoveAtomAt { id, port } => {
                 code.push_str(&format!("atom_{}->remove_at({});", id, port));
             }
+            LMNtalIR::CreateHyperlink { id, name } => {
+                code.push_str(&format!("auto hl_{} = create_hyperlink(\"{}\");", id, name));
+            }
+            LMNtalIR::LinkToHyperlink { atom, hyperlink } => {
+                code.push_str(&format!("hl_{}->add({});", hyperlink.id(), fmt(atom)));
+            }
+            LMNtalIR::RemoveFromHyperlink { atom, hyperlink } => {
+                code.push_str(&format!("hl_{}->remove({});", hyperlink.id(), fmt(atom)));
+            }
+            LMNtalIR::FuseHyperlink { into, from } => {
+                code.push_str(&format!("hl_{}->fuse(hl_{});", into.id(), from.id()));
+                code.push_str(&format!("remove_hyperlink(hl_{});", from));
+            }
+            _ => unreachable!(),
         }
         code
     }
@@ -245,11 +247,15 @@ impl CppBackend {
                 code.push_str(&self.pretty_print(ir, *indent));
                 code.push_str(&format!(" if (!atom_{}) continue;\n", id));
             }
+            LMNtalIR::GetHyperlinkAtPort { id, .. } => {
+                code.push_str(&self.pretty_print(ir, *indent));
+                code.push_str(&format!(" if (!hl_{}) continue;\n", id));
+            }
             LMNtalIR::AtomEquality { id_port_list, eq } => {
                 if *eq {
-                    code.push_str(&format!("{}if (equals(", " ".repeat(*indent)));
-                } else {
                     code.push_str(&format!("{}if (!equals(", " ".repeat(*indent)));
+                } else {
+                    code.push_str(&format!("{}if (equals(", " ".repeat(*indent)));
                 }
                 for (i, (id, port)) in id_port_list.iter().enumerate() {
                     if i != 0 {
@@ -281,7 +287,7 @@ impl CppBackend {
                 code.push('\n');
             }
 
-            code.push_str(&format!("{}return true;\n", " ".repeat(*indent)));
+            code.push_str(&format!("{}return true;", " ".repeat(*indent)));
 
             return code;
         }
@@ -325,7 +331,7 @@ impl CppBackend {
             ));
             *indent -= 2;
         } else {
-            code.push_str(&format!("{}return true;\n", " ".repeat(*indent)));
+            code.push_str(&format!("{}return true;", " ".repeat(*indent)));
         }
 
         code

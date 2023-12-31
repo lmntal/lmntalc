@@ -154,7 +154,7 @@ impl ASTNode {
                 name, hyperlink, ..
             } => {
                 if *hyperlink {
-                    format!("HyperLink: {}", name)
+                    format!("Hyperlink: {}", name)
                 } else {
                     format!("Link: {}", name)
                 }
