@@ -73,12 +73,21 @@ pub enum LMNtalIR {
     },
     /// Get the hyperlink at specified `port` of atom with specified `id`
     GetHyperlinkAtPort { id: usize, from: usize, port: usize },
-    /// Check if atoms at these atom-port pairs are equal
-    AtomEquality {
+    /// Check if atoms (or hyperlinks) at id's port are equal
+    AtomEqualityIdPort {
         /// List of atoms and their ports
         id_port_list: Vec<(usize, usize)>,
         /// Whether the atoms are equal or not
         eq: bool,
+    },
+    /// Check if atoms (or hyperlinks) are equal
+    AtomEquality {
+        /// List of atoms and their ports
+        id_list: Vec<usize>,
+        /// Whether the atoms are equal or not
+        eq: bool,
+        /// Whether they are hyperlinks or atoms
+        hyperlinks: bool,
     },
     /// Check the type of an atom at atom `id`'s `port`
     CheckType {
@@ -154,14 +163,24 @@ impl Display for LMNtalIR {
                 from.underline().bold(),
                 port,
             ),
-            LMNtalIR::AtomEquality { id_port_list, eq } => {
-                if *eq {
-                    write!(f, "atoms are equal:\n\t\t")?;
-                } else {
-                    write!(f, "atoms are not equal:\n\t\t")?;
-                }
+            LMNtalIR::AtomEqualityIdPort { id_port_list, eq } => {
+                let predicate = if *eq { "are" } else { "are not" };
+                write!(f, "atoms {} equal:\n\t\t", predicate)?;
                 for (id, port) in id_port_list {
                     write!(f, "at {} port {},", id.underline().bold(), port)?;
+                }
+                Ok(())
+            }
+            LMNtalIR::AtomEquality {
+                id_list,
+                eq,
+                hyperlinks,
+            } => {
+                let content = if *hyperlinks { "hyperlinks" } else { "atoms" };
+                let predicate = if *eq { "are" } else { "are not" };
+                write!(f, "{} {} equal:\n\t\t", content, predicate)?;
+                for id in id_list {
+                    write!(f, "at {},", id.underline().bold())?;
                 }
                 Ok(())
             }

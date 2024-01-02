@@ -237,7 +237,7 @@ if __name__ == "__main__":
                     " ".repeat(*indent + 4)
                 ));
             }
-            LMNtalIR::AtomEquality { id_port_list, eq } => {
+            LMNtalIR::AtomEqualityIdPort { id_port_list, eq } => {
                 if *eq {
                     code.push_str(&format!("{}if not equals(", " ".repeat(*indent)));
                 } else {
@@ -248,6 +248,33 @@ if __name__ == "__main__":
                         code.push_str(", ");
                     }
                     code.push_str(&format!("atom_{}.at({})", id, port,));
+                }
+                code.push_str(&format!("):\n{}continue\n", " ".repeat(*indent + 4)));
+            }
+            LMNtalIR::AtomEquality {
+                id_list,
+                eq,
+                hyperlinks,
+            } => {
+                if *eq {
+                    code.push_str(&format!("{}if not equals(", " ".repeat(*indent)));
+                } else {
+                    code.push_str(&format!("{}if equals(", " ".repeat(*indent)));
+                }
+                if *hyperlinks {
+                    for (i, id) in id_list.iter().enumerate() {
+                        if i != 0 {
+                            code.push_str(", ");
+                        }
+                        code.push_str(&format!("hl_{}", id));
+                    }
+                } else {
+                    for (i, id) in id_list.iter().enumerate() {
+                        if i != 0 {
+                            code.push_str(", ");
+                        }
+                        code.push_str(&format!("atom_{}", id));
+                    }
                 }
 
                 code.push_str(&format!("):\n{}continue\n", " ".repeat(*indent + 4)));

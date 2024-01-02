@@ -150,8 +150,12 @@ impl CppBackend {
                 code.push_str(&format!("hl_{}->remove({});", hyperlink.id(), fmt(atom)));
             }
             LMNtalIR::FuseHyperlink { into, from } => {
-                code.push_str(&format!("hl_{}->fuse(hl_{});", into.id(), from.id()));
-                code.push_str(&format!("remove_hyperlink(hl_{});", from));
+                code.push_str(&format!("hl_{}->fuse(hl_{});\n", into.id(), from.id()));
+                code.push_str(&format!(
+                    "{}remove_hyperlink(hl_{});",
+                    " ".repeat(indent),
+                    from.id()
+                ));
             }
             _ => unreachable!(),
         }
@@ -251,7 +255,7 @@ impl CppBackend {
                 code.push_str(&self.pretty_print(ir, *indent));
                 code.push_str(&format!(" if (!hl_{}) continue;\n", id));
             }
-            LMNtalIR::AtomEquality { id_port_list, eq } => {
+            LMNtalIR::AtomEqualityIdPort { id_port_list, eq } => {
                 if *eq {
                     code.push_str(&format!("{}if (!equals(", " ".repeat(*indent)));
                 } else {
@@ -262,6 +266,33 @@ impl CppBackend {
                         code.push_str(", ");
                     }
                     code.push_str(&format!("atom_{}->at({})", id, port,));
+                }
+                code.push_str(")) continue;\n");
+            }
+            LMNtalIR::AtomEquality {
+                id_list,
+                eq,
+                hyperlinks,
+            } => {
+                if *eq {
+                    code.push_str(&format!("{}if (!equals(", " ".repeat(*indent)));
+                } else {
+                    code.push_str(&format!("{}if (equals(", " ".repeat(*indent)));
+                }
+                if *hyperlinks {
+                    for (i, id) in id_list.iter().enumerate() {
+                        if i != 0 {
+                            code.push_str(", ");
+                        }
+                        code.push_str(&format!("hl_{}", id));
+                    }
+                } else {
+                    for (i, id) in id_list.iter().enumerate() {
+                        if i != 0 {
+                            code.push_str(", ");
+                        }
+                        code.push_str(&format!("atom_{}", id));
+                    }
                 }
 
                 code.push_str(")) continue;\n");

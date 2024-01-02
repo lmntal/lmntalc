@@ -48,3 +48,4 @@
     interface Rule {
         boolean apply();
     }
+

@@ -299,5 +299,39 @@ bool equals(T t1, T t2, T t3, Args... args) {
   return t1 == t2 && t1 == t3 && Compare(args...);
 }
 
-void dump_atoms() { std::cout << global_atoms.dump() << "\n"; }
+void dump_atoms() { std::cout << global_atoms.dump() << "\n"; }bool aXbY() {
+  for (auto atom_0 : find_atom("a", 1)) {
+    auto hl_1 = get_hlink_at_port(atom_0, 0); if (!hl_1) continue;
+    for (auto atom_2 : find_atom("b", 1)) {
+      auto hl_3 = get_hlink_at_port(atom_2, 0); if (!hl_3) continue;
+      if (equals(hl_3, hl_1)) continue;
+      auto atom_4 = create_atom("d", 1);
+      hl_1->add(atom_4, 0);
+      remove_atom(atom_0);
+      hl_1->remove(atom_0, 0);
+      remove_atom(atom_2);
+      hl_3->remove(atom_2, 0);
+      hl_1->fuse(hl_3);
+      remove_hyperlink(hl_3);
+      return true;
+    }
+  }
+  return false;
+}
 
+int main() {
+  std::bitset<1> rule_fail;
+  constexpr rule rules[1] = {
+    aXbY,
+  };
+  std::mt19937 rng(std::random_device{}());
+  while (!rule_fail.all()) {
+    auto const rand = rng() % 1;
+    if (rules[rand]()) {
+      rule_fail.reset();
+    } else {
+      rule_fail.set(rand);
+    }
+  }
+  dump_atoms();
+}

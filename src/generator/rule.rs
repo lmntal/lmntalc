@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fmt::Display,
 };
 
@@ -129,7 +129,7 @@ fn generate_pattern(
             }
             1 => {}
             _ => {
-                let neighbors: Vec<_> = neighbors
+                let neighbors: HashSet<_> = neighbors
                     .into_iter()
                     .map(|n| {
                         (
@@ -144,8 +144,11 @@ fn generate_pattern(
     }
 
     let mut queue = VecDeque::new();
+    let mut atoms_to_be_different: HashMap<String, Vec<_>> = HashMap::new();
+    let mut hyperlinks_to_be_different = HashMap::new();
     let head = rule.head_atoms();
     let hyperlinks = rule.hyperlinks();
+    // zero incoming are starting points for every connected component
     for atom_id in zero_incoming {
         let atom = head.get(&atom_id).unwrap();
         inst.push(LMNtalIR::FindAtom {
@@ -153,6 +156,20 @@ fn generate_pattern(
             name: atom.name().to_string(),
             arity: atom.args().count(),
         });
+        // atoms between different connected components should be different
+        if let Some(set) = atoms_to_be_different.get_mut(atom.name()) {
+            let mut id_list = vec![*slot];
+            for id in set.iter() {
+                id_list.push(*id);
+            }
+            inst.push(LMNtalIR::AtomEquality {
+                id_list,
+                eq: false,
+                hyperlinks: false,
+            });
+        } else {
+            atoms_to_be_different.insert(atom.name().to_string(), vec![*slot]);
+        }
         remove_queue.push(LMNtalIR::RemoveAtom { id: *slot });
         symbol_table.insert(atom_id, *slot);
         *slot += 1;
@@ -164,6 +181,7 @@ fn generate_pattern(
                         from: symbol_table[&atom_id],
                         port: idx,
                     });
+                    hyperlinks_to_be_different.insert(arg_id, *slot);
                     symbol_table.insert(arg_id, *slot);
                     *slot += 1;
                     remove_queue.push(LMNtalIR::RemoveFromHyperlink {
@@ -208,9 +226,17 @@ fn generate_pattern(
         for (proc, idx) in &atoms {
             id_port_list.push((symbol_table[&proc.id()], *idx));
         }
-        inst.push(LMNtalIR::AtomEquality {
+        inst.push(LMNtalIR::AtomEqualityIdPort {
             id_port_list,
             eq: true, // they should be equal
+        });
+    }
+
+    if hyperlinks_to_be_different.len() > 1 {
+        inst.push(LMNtalIR::AtomEquality {
+            id_list: hyperlinks_to_be_different.values().copied().collect(),
+            eq: false,
+            hyperlinks: true,
         });
     }
 
@@ -283,8 +309,26 @@ fn generate_case(
     }
 
     let mut link_queue = vec![];
+    let mut skip_fuse = HashSet::new();
 
     for (atom_id, atom) in rule.body_atoms() {
+        if atom.name() == "><" && atom.args().count() == 2 {
+            let mut args = atom.args();
+            let arg1 = args.next().unwrap();
+            let arg2 = args.next().unwrap();
+            if let RuleLinkArg::Head(op1, _) = arg1.opposite {
+                if let RuleLinkArg::Head(op2, _) = arg2.opposite {
+                    // fuse hyperlinks after all links are created, in case the atoms linked to the hyperlinks that are being fused
+                    remove_queue.push(LMNtalIR::FuseHyperlink {
+                        into: VarSource::Head(symbol_table[&op1], 0),
+                        from: VarSource::Head(symbol_table[&op2], 0),
+                    });
+                    skip_fuse.insert(atom_id);
+                    continue;
+                }
+            }
+        }
+
         body.push(LMNtalIR::CreateAtom {
             id: *slot,
             name: atom.name().to_string(),
@@ -308,6 +352,9 @@ fn generate_case(
     }
 
     for (this_id, atom) in rule.body_atoms() {
+        if skip_fuse.contains(&this_id) {
+            continue;
+        }
         for (this_port, arg) in atom.args().enumerate() {
             match arg.opposite {
                 RuleLinkArg::Body(op, port) => {

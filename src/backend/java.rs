@@ -252,7 +252,7 @@ impl JavaBackend {
                 code.push_str(&self.pretty_print(ir, *indent));
                 code.push_str(&format!(" if (hl_{} == null) continue;\n", id));
             }
-            LMNtalIR::AtomEquality { id_port_list, eq } => {
+            LMNtalIR::AtomEqualityIdPort { id_port_list, eq } => {
                 if *eq {
                     code.push_str(&format!("{}if (!Main.equals(", " ".repeat(*indent)));
                 } else {
@@ -264,7 +264,33 @@ impl JavaBackend {
                     }
                     code.push_str(&format!("atom_{}.at({})", id, port,));
                 }
-
+                code.push_str(")) continue;\n");
+            }
+            LMNtalIR::AtomEquality {
+                id_list,
+                eq,
+                hyperlinks,
+            } => {
+                if *eq {
+                    code.push_str(&format!("{}if (!Main.equals(", " ".repeat(*indent)));
+                } else {
+                    code.push_str(&format!("{}if (Main.equals(", " ".repeat(*indent)));
+                }
+                if *hyperlinks {
+                    for (i, id) in id_list.iter().enumerate() {
+                        if i != 0 {
+                            code.push_str(", ");
+                        }
+                        code.push_str(&format!("hl_{}", id,));
+                    }
+                } else {
+                    for (i, id) in id_list.iter().enumerate() {
+                        if i != 0 {
+                            code.push_str(", ");
+                        }
+                        code.push_str(&format!("atom_{}", id,));
+                    }
+                }
                 code.push_str(")) continue;\n");
             }
             _ => {
