@@ -14,6 +14,7 @@ use lmntalc::{
     transform::transform_lmntal,
     util::SourceCode,
 };
+use owo_colors::OwoColorize;
 
 #[derive(Parser)]
 #[command(name = "LMNtal Compiler")]
@@ -25,11 +26,29 @@ struct Cli {
     #[arg(short, long, help = "Output file name")]
     pub output: Option<PathBuf>,
 
-    #[arg(long, value_name = "dump ast", default_value = "false")]
+    #[arg(
+        long,
+        value_name = "dump ast",
+        default_value = "false",
+        help = "Dump AST"
+    )]
     dump_ast: bool,
 
-    #[arg(long, value_name = "show ir", default_value = "false")]
+    #[arg(
+        long,
+        value_name = "show ir",
+        default_value = "false",
+        help = "Show compiled IR"
+    )]
     show_ir: bool,
+
+    #[arg(
+        long,
+        value_name = "parse only",
+        default_value = "false",
+        help = "Parse and analyze only, do not generate actual code. (Show AST and IR is still available)"
+    )]
+    parse_only: bool,
 
     #[arg(value_name = "FILE")]
     source: PathBuf,
@@ -58,6 +77,22 @@ fn main() -> io::Result<()> {
 
     let mut gen = Generator::new();
     gen.generate(&transform_res.program);
+
+    if cli.dump_ast {
+        let t = tree(&res.ast, "Root membrane".to_owned());
+        match t {
+            Ok(t) => println!("{}\n{}", "AST:".bold().underline(), t),
+            Err(e) => println!("{}", e),
+        }
+    }
+
+    if cli.show_ir {
+        println!("{}\n{}", "Compiled IR:".bold().underline(), gen);
+    }
+
+    if cli.parse_only {
+        return Ok(());
+    }
 
     let output_file_name = if let Some(ref output_file_name) = cli.output {
         output_file_name.clone()
@@ -88,18 +123,6 @@ fn main() -> io::Result<()> {
     output_file
         .write_all(code.as_bytes())
         .expect("cannot write file");
-
-    if cli.dump_ast {
-        let t = tree(&res.ast, "Root membrane".to_owned());
-        match t {
-            Ok(t) => println!("{}", t),
-            Err(e) => println!("{}", e),
-        }
-    }
-
-    if cli.show_ir {
-        println!("{}", gen);
-    }
 
     Ok(())
 }
