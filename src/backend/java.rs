@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{
     data::{guard::ProcessConstraint, Data},
     generator::{
@@ -12,11 +14,15 @@ use super::Backend;
 static LMNTAL: &[u8] = include_bytes!("../../assets/lib/java/lmntal.java");
 static MAIN: &[u8] = include_bytes!("../../assets/lib/java/main.java");
 
-pub struct JavaBackend;
+pub struct JavaBackend {
+    var_type: HashMap<usize, ProcessConstraint>,
+}
 
 impl Backend for JavaBackend {
     fn new() -> Self {
-        Self
+        Self {
+            var_type: HashMap::new(),
+        }
     }
 
     fn pretty_print(&mut self, generator: &Generator) -> String {
@@ -32,11 +38,11 @@ impl Backend for JavaBackend {
 }
 
 impl JavaBackend {
-    fn pretty_print(&self, ir: &LMNtalIR, indent: usize) -> String {
+    fn pretty_print(&mut self, ir: &LMNtalIR, indent: usize) -> String {
         let mut code = " ".repeat(indent);
         let fmt = |&source| match source {
-            crate::ir::VarSource::Definition(id) => {
-                format!("temp_{}, 0", id)
+            crate::ir::VarSource::Variable(id) => {
+                format!("atom_{}, 0", id)
             }
             crate::ir::VarSource::Head(id, port) | crate::ir::VarSource::Body(id, port) => {
                 format!("atom_{}, {}", id, port)
@@ -53,23 +59,31 @@ impl JavaBackend {
                     "var atom_{} = AtomStore.INSTANCE.createAtom(\"{}\", {});",
                     id, name, arity
                 ));
-                match data {
-                    Data::Empty => {}
-                    Data::Int(i) => {
-                        code.push_str(&format!("\n{}", " ".repeat(indent)));
-                        code.push_str(&format!("atom_{}.setInt({});", id, i));
-                    }
-                    Data::Float(f) => {
-                        code.push_str(&format!("\n{}", " ".repeat(indent)));
-                        code.push_str(&format!("atom_{}.setFloat({});", id, f));
-                    }
-                    Data::Char(c) => {
-                        code.push_str(&format!("\n{}", " ".repeat(indent)));
-                        code.push_str(&format!("atom_{}.setChar({});", id, c));
-                    }
-                    Data::String(s) => {
-                        code.push_str(&format!("\n{}", " ".repeat(indent)));
-                        code.push_str(&format!("atom_{}.setString(\"{}\");", id, s));
+                if !data.is_empty() {
+                    code.push_str(&format!("\n{}", " ".repeat(indent)));
+                    match data {
+                        Data::Int(i) => {
+                            code.push_str(&format!("atom_{}.setInt({});", id, i));
+                        }
+                        Data::Float(f) => {
+                            code.push_str(&format!("atom_{}.setFloat({});", id, f));
+                        }
+                        Data::Char(c) => {
+                            code.push_str(&format!("atom_{}.setChar({});", id, c));
+                        }
+                        Data::String(s) => {
+                            code.push_str(&format!("atom_{}.setString(\"{}\");", id, s));
+                        }
+                        Data::Variable(var_id) => {
+                            let ty = self.var_type.get(&(*var_id).into()).unwrap();
+                            code.push_str(&format!(
+                                "atom_{}.set{}(var_{});",
+                                id,
+                                atom_type_to_string(ty),
+                                var_id
+                            ));
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -96,18 +110,9 @@ impl JavaBackend {
                 ));
             }
             LMNtalIR::CheckValue(op) => code.push_str(&print_operation(op)),
-            LMNtalIR::DefineTempVar { id, name, ty, op } => {
-                code.push_str(&format!(
-                    "var temp_{} = AtomStore.INSTANCE.createAtom(\"{}\", 1);\n",
-                    id, name
-                ));
-                code.push_str(&format!(
-                    "{}temp_{}.set{}({});",
-                    " ".repeat(indent),
-                    id,
-                    atom_type_to_string(ty),
-                    print_operation(op)
-                ));
+            LMNtalIR::DefineTempVar { id, ty, op, .. } => {
+                code.push_str(&format!("var var_{} = {};", id, print_operation(op)));
+                self.var_type.insert(*id, *ty);
             }
             LMNtalIR::CloneAtom { id, from } => {
                 code.push_str(&format!("var atom_{} = cloneAtom(atom_{});", id, from));
@@ -159,7 +164,7 @@ impl JavaBackend {
         code
     }
 
-    fn print_main(&self, generator: &Generator) -> String {
+    fn print_main(&mut self, generator: &Generator) -> String {
         let mut code = String::new();
         code.push_str("    public static void main(String[] args) {\n");
         for node in &generator.init {
@@ -196,7 +201,7 @@ impl JavaBackend {
         code
     }
 
-    fn print_rules(&self, rules: &[RuleIR]) -> String {
+    fn print_rules(&mut self, rules: &[RuleIR]) -> String {
         let mut code = String::new();
         for rule in rules {
             code.push_str(&self.print_rule(rule));
@@ -204,7 +209,7 @@ impl JavaBackend {
         code
     }
 
-    fn print_rule(&self, rule: &RuleIR) -> String {
+    fn print_rule(&mut self, rule: &RuleIR) -> String {
         let mut code = String::new();
         let mut indent = 12;
         code.push_str(&format!(
@@ -231,7 +236,7 @@ impl JavaBackend {
         code
     }
 
-    fn print_pattern(&self, ir: &LMNtalIR, indent: &mut usize) -> String {
+    fn print_pattern(&mut self, ir: &LMNtalIR, indent: &mut usize) -> String {
         let mut code = String::new();
         match ir {
             LMNtalIR::FindAtom { id, name, arity } => {
@@ -301,7 +306,7 @@ impl JavaBackend {
         code
     }
 
-    fn print_case(&self, case: &Case, one_case: bool, indent: &mut usize) -> String {
+    fn print_case(&mut self, case: &Case, one_case: bool, indent: &mut usize) -> String {
         let mut code = String::new();
         if case.condition.is_empty() {
             for ir in &case.definition {
@@ -375,10 +380,14 @@ fn print_operation(op: &Operation) -> String {
         },
         Operation::Variable { source, ty_ } => match source {
             crate::ir::VarSource::Head(id, port) | crate::ir::VarSource::Body(id, port) => {
-                format!("atom_{}.at({}).get{}()", id, port, atom_type_to_string(ty_))
+                if *ty_ == ProcessConstraint::Hyperlink {
+                    format!("getHyperlinkAtPort(atom_{}, {})", id, port)
+                } else {
+                    format!("atom_{}.at({}).get{}()", id, port, atom_type_to_string(ty_))
+                }
             }
-            crate::ir::VarSource::Definition(id) => {
-                format!("atom_{}.get{}()", id, atom_type_to_string(ty_),)
+            crate::ir::VarSource::Variable(id) => {
+                format!("var_{}", id)
             }
         },
         Operation::BinaryOP { op, lhs, rhs } => {
@@ -411,6 +420,23 @@ fn print_operation(op: &Operation) -> String {
                 print_operation(operand)
             )
         }
+        Operation::FunctionCall { name, args, ty_ } => {
+            if crate::data::guard::RESERVED_FUNC
+                .iter()
+                .any(|func| func.name == name)
+            {
+                print_reserved_func(name, args, ty_)
+            } else {
+                format!("{}({})", name, args.len())
+            }
+        }
+    }
+}
+
+fn print_reserved_func(name: &str, args: &[Operation], _type: &ProcessConstraint) -> String {
+    match name {
+        "num" => format!("{}.getArity()", print_operation(&args[0])),
+        _ => unimplemented!(),
     }
 }
 

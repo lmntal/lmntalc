@@ -1,16 +1,67 @@
+use crate::token::Operator;
+use once_cell::sync::Lazy;
 use std::{collections::HashMap, fmt::Display};
 
-use crate::token::Operator;
-
 use super::id::AtomId;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct VariableId(usize);
+
+impl From<usize> for VariableId {
+    fn from(id: usize) -> Self {
+        Self(id)
+    }
+}
+
+impl From<VariableId> for usize {
+    fn from(id: VariableId) -> Self {
+        let VariableId(id) = id;
+        id
+    }
+}
+
+impl Display for VariableId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let VariableId(id) = self;
+        write!(f, "{}", id)
+    }
+}
 
 #[derive(Debug, Default, Clone)]
 pub struct Guard {
     /// List of conditions
     pub constraints: Vec<GuardNode>,
     /// Map from variable id to the expression
-    pub definitions: HashMap<AtomId, GuardNode>,
+    pub definitions: HashMap<VariableId, Variable>,
+    /// Map from variable name to the id
+    pub defined: HashMap<String, VariableId>,
 }
+
+#[derive(Debug, Clone)]
+pub struct Variable {
+    pub name: String,
+    pub ty: Option<ProcessConstraint>,
+    pub node: GuardNode,
+}
+
+/// A function signature.
+///
+/// Currently only reserved `num` is supported.
+/// User-defined functions will be supported in the future.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FuncSig {
+    pub name: &'static str,
+    pub args: Vec<ProcessConstraint>,
+    pub ret: ProcessConstraint,
+}
+
+pub static RESERVED_FUNC: Lazy<Vec<FuncSig>> = Lazy::new(|| {
+    vec![FuncSig {
+        name: "num",
+        args: vec![ProcessConstraint::Hyperlink],
+        ret: ProcessConstraint::Int,
+    }]
+});
 
 /// Source of a guard
 #[derive(Debug, Clone)]
@@ -18,19 +69,9 @@ pub enum GuardSource {
     /// Refer to the atom at `AtomId`'s `usize`-th argument
     AtPortOfAtom(AtomId, usize),
     /// Refer to the atom that defined in guard
-    Definition(AtomId),
+    Variable(VariableId),
     /// A placeholder for a variable that will be substituted later
     Placeholder(String),
-}
-
-impl Guard {
-    pub(crate) fn add_constraint(&mut self, node: GuardNode) {
-        self.constraints.push(node);
-    }
-
-    pub(crate) fn add_definition(&mut self, id: AtomId, node: GuardNode) {
-        self.definitions.insert(id, node);
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -41,8 +82,10 @@ pub enum GuardNode {
     Int(i64),
     /// Float literal, like `1.0`
     Float(f64),
-    /// Function constraint, like `int(X)`, `float(X, Y)`, etc.
-    Func(ProcessConstraint, Vec<GuardSource>),
+    /// Process constraint, like `int(X)`, `float(X, Y)`, etc.
+    Constraint(ProcessConstraint, Vec<GuardSource>),
+    /// Function call, like `num(!X)`
+    Function(FuncSig, Vec<GuardNode>),
     /// Binary operation, like `X + Y`, except assignment
     Binary(Operator, Box<GuardNode>, Box<GuardNode>),
 }
@@ -56,6 +99,26 @@ pub enum ProcessConstraint {
     Ground,
     Unary,
     String,
+}
+
+impl Guard {
+    pub(crate) fn add_constraint(&mut self, node: GuardNode) {
+        self.constraints.push(node);
+    }
+
+    pub(crate) fn add_definition(&mut self, id: VariableId, name: &str, node: GuardNode) {
+        let var = Variable {
+            name: name.to_string(),
+            ty: None,
+            node,
+        };
+        self.definitions.insert(id, var);
+        self.defined.insert(name.to_string(), id);
+    }
+
+    pub(crate) fn defined(&self, name: &str) -> Option<VariableId> {
+        self.defined.get(name).copied()
+    }
 }
 
 impl Display for ProcessConstraint {

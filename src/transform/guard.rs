@@ -3,8 +3,7 @@ use std::collections::HashMap;
 use crate::{
     ast::{ASTNode, AtomName},
     data::{
-        guard::{Guard, GuardNode, GuardSource, ProcessConstraint},
-        id::AtomId,
+        guard::{Guard, GuardNode, GuardSource, ProcessConstraint, VariableId, RESERVED_FUNC},
         rule::Rule,
     },
     token::Operator,
@@ -13,6 +12,7 @@ use crate::{
 pub(super) fn visit_guard(rule: &mut Rule, process_list: &ASTNode) -> Guard {
     let mut guards = Guard::default();
     let mut defined = HashMap::new();
+    let mut id: usize = 0;
     if let ASTNode::ProcessList { processes, .. } = process_list {
         for process in processes {
             if let ASTNode::Atom { name, args, .. } = process {
@@ -26,9 +26,9 @@ pub(super) fn visit_guard(rule: &mut Rule, process_list: &ASTNode) -> Guard {
                         };
                         let rhs = &args[1];
                         let node = transform_guard_expr(rhs, &defined);
-                        let id = rule.register_def(&lhs);
-                        guards.add_definition(id, node);
-                        defined.insert(lhs, id);
+                        guards.add_definition(id.into(), &lhs, node);
+                        defined.insert(lhs, id.into());
+                        id += 1;
                     }
                     // comparison
                     AtomName::Operator(op) if op.is_relational() => {
@@ -46,7 +46,7 @@ pub(super) fn visit_guard(rule: &mut Rule, process_list: &ASTNode) -> Guard {
                                 unimplemented!("type constraint on non-link")
                             }
                         }
-                        guards.add_constraint(GuardNode::Func(ty, vars));
+                        guards.add_constraint(GuardNode::Constraint(ty, vars));
                     }
                     _ => {
                         panic!("illegal guard in rule {}", rule.name)
@@ -62,7 +62,7 @@ pub(super) fn visit_guard(rule: &mut Rule, process_list: &ASTNode) -> Guard {
     guards
 }
 
-fn transform_guard_expr(expr: &ASTNode, defined: &HashMap<String, AtomId>) -> GuardNode {
+fn transform_guard_expr(expr: &ASTNode, defined: &HashMap<String, VariableId>) -> GuardNode {
     match expr {
         ASTNode::Atom { name, args, .. } => match name {
             AtomName::Int(i) => GuardNode::Int(*i),
@@ -74,13 +74,32 @@ fn transform_guard_expr(expr: &ASTNode, defined: &HashMap<String, AtomId>) -> Gu
                 let rhs = transform_guard_expr(rhs, defined);
                 GuardNode::Binary(*op, Box::new(lhs), Box::new(rhs))
             }
-            AtomName::Keyword(..) | AtomName::Char(..) | AtomName::Plain(..) => unreachable!(),
+            AtomName::Plain(name) => {
+                if let Some(func) = RESERVED_FUNC.iter().find(|func| func.name == name) {
+                    let vars = args
+                        .iter()
+                        .map(|arg| transform_guard_expr(arg, defined))
+                        .collect::<Vec<_>>();
+                    GuardNode::Function(func.clone(), vars)
+                } else {
+                    panic!("cannot find function {}", name)
+                }
+            }
+            AtomName::Keyword(..) | AtomName::Char(..) => unreachable!(),
         },
-        ASTNode::Link { name, .. } => {
+        ASTNode::Link {
+            name, hyperlink, ..
+        } => {
             if let Some(id) = defined.get(name) {
-                GuardNode::Var(GuardSource::Definition(*id))
+                GuardNode::Var(GuardSource::Variable(*id))
             } else {
-                GuardNode::Var(GuardSource::Placeholder(name.clone()))
+                // prepend `!` to the name if it's a hyperlink
+                let name = if *hyperlink {
+                    format!("!{}", name)
+                } else {
+                    name.clone()
+                };
+                GuardNode::Var(GuardSource::Placeholder(name))
             }
         }
         ASTNode::Context { .. } => {

@@ -71,6 +71,9 @@ class Hyperlink(Atom):
         self.args.remove(atom)
         atom.args[index] = None
 
+    def arity(self) -> int:
+        return len(self.args)
+
 
 class AtomStore:
     store: dict[int, list[NormalAtom]]

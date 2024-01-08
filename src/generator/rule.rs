@@ -31,15 +31,6 @@ pub struct RuleGenerator<'rule> {
 }
 
 #[derive(Debug)]
-pub struct MergeableRuleGenerator<'rule> {
-    rules: &'rule [Rule],
-    rule_indices: &'rule [usize],
-    remove_queue: Vec<LMNtalIR>,
-    slot: usize,
-    symbol_table: HashMap<AtomId, usize>,
-}
-
-#[derive(Debug)]
 pub struct RuleIR {
     pub name: String,
     pub cases: Vec<Case>,
@@ -72,34 +63,6 @@ impl<'rule> RuleGenerator<'rule> {
 
         RuleIR {
             name: self.rule.name.clone(),
-            cases,
-            pattern,
-        }
-    }
-}
-
-impl<'rule> MergeableRuleGenerator<'rule> {
-    pub fn generate(&mut self) -> RuleIR {
-        let pattern = generate_pattern(
-            &self.rules[self.rule_indices[0]],
-            &mut self.slot,
-            &mut self.symbol_table,
-            &mut self.remove_queue,
-        );
-        let mut cases = vec![];
-
-        for rule_idx in self.rule_indices {
-            let rule = &self.rules[*rule_idx];
-            cases.push(generate_case(
-                rule,
-                &mut self.slot,
-                &mut self.symbol_table,
-                self.remove_queue.clone(),
-            ));
-        }
-
-        RuleIR {
-            name: self.rules[self.rule_indices[0]].name.clone(),
             cases,
             pattern,
         }
@@ -292,20 +255,29 @@ fn generate_case(
         condition.push(LMNtalIR::CheckValue(transform_guard(c, rule, symbol_table)));
     }
 
-    for (atom_id, guard) in &guard.definitions {
-        let defs = rule.definitions();
-        let atom = defs.get(atom_id).unwrap();
-        if let Some(ty) = atom.type_() {
-            definition.push(LMNtalIR::DefineTempVar {
-                id: *slot,
-                name: atom.name().to_string(),
-                ty,
-                op: transform_guard(guard, rule, symbol_table),
-            });
+    for (var_id, var) in &guard.definitions {
+        definition.push(LMNtalIR::DefineTempVar {
+            id: (*var_id).into(),
+            name: var.name.to_string(),
+            ty: var.ty.unwrap(),
+            op: transform_guard(&var.node, rule, symbol_table),
+        });
+    }
 
-            symbol_table.insert(*atom_id, *slot);
-            *slot += 1;
-        }
+    definition.sort_by(|a, b| match (a, b) {
+        (LMNtalIR::DefineTempVar { id: a, .. }, LMNtalIR::DefineTempVar { id: b, .. }) => a.cmp(b),
+        _ => unreachable!(),
+    });
+
+    for (atom_id, atom) in rule.var_atoms() {
+        body.push(LMNtalIR::CreateAtom {
+            id: *slot,
+            name: atom.name().to_string(),
+            arity: 1,
+            data: atom.data().clone(),
+        });
+        symbol_table.insert(atom_id, *slot);
+        *slot += 1;
     }
 
     let mut link_queue = vec![];
@@ -444,14 +416,14 @@ fn create_link(link: &RuleLink, symbol_table: &HashMap<AtomId, usize>) -> Option
             Some(LMNtalIR::Relink {
                 src: symbol_table[&head_id],
                 src_port: port,
-                dst: VarSource::Definition(symbol_table[&temp_id]),
+                dst: VarSource::Variable(symbol_table[&temp_id]),
             })
         }
 
         (RuleLinkArg::Temp(_, _), _) => None,
 
         (RuleLinkArg::Body(id, port), RuleLinkArg::Temp(tmp_id, _)) => Some(LMNtalIR::Link {
-            src: VarSource::Definition(symbol_table[&tmp_id]),
+            src: VarSource::Variable(symbol_table[&tmp_id]),
             dst: VarSource::Body(symbol_table[&id], port),
         }),
     }
@@ -476,12 +448,11 @@ fn transform_guard(
                     unreachable!()
                 }
             }
-            GuardSource::Definition(def_id) => {
-                let defs = rule.definitions();
-                let atom = defs.get(def_id).unwrap();
+            GuardSource::Variable(def_id) => {
+                let def = rule.guard.definitions.get(def_id).unwrap();
                 Operation::Variable {
-                    source: ir::VarSource::Definition(symbol_table[def_id]),
-                    ty_: atom.type_().unwrap(),
+                    source: ir::VarSource::Variable((*def_id).into()),
+                    ty_: def.ty.unwrap(),
                 }
             }
             GuardSource::Placeholder(_) => unreachable!(),
@@ -495,6 +466,17 @@ fn transform_guard(
                 op: op.into(),
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
+            }
+        }
+        GuardNode::Function(sig, args) => {
+            let mut ir_args = vec![];
+            for arg in args {
+                ir_args.push(transform_guard(arg, rule, symbol_table));
+            }
+            Operation::FunctionCall {
+                name: sig.name.to_owned(),
+                args: ir_args,
+                ty_: sig.ret,
             }
         }
         _ => unreachable!(),

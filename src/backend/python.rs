@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{
     data::{guard::ProcessConstraint, Data},
     generator::{
@@ -11,11 +13,15 @@ use super::Backend;
 
 static HEADER: &[u8] = include_bytes!("../../assets/lib/python/lmntal.py");
 
-pub struct PythonBackend;
+pub struct PythonBackend {
+    var_type: HashMap<usize, ProcessConstraint>,
+}
 
 impl Backend for PythonBackend {
     fn new() -> Self {
-        Self
+        Self {
+            var_type: HashMap::new(),
+        }
     }
 
     fn pretty_print(&mut self, generator: &Generator) -> String {
@@ -31,8 +37,8 @@ impl PythonBackend {
     fn print_ir(&mut self, ir: &LMNtalIR, indent: usize) -> String {
         let mut code = " ".repeat(indent);
         let fmt = |&source| match source {
-            crate::ir::VarSource::Definition(id) => {
-                format!("temp_{}, 0", id)
+            crate::ir::VarSource::Variable(id) => {
+                format!("atom_{}, 0", id)
             }
             crate::ir::VarSource::Head(id, port) | crate::ir::VarSource::Body(id, port) => {
                 format!("atom_{}, {}", id, port)
@@ -49,23 +55,31 @@ impl PythonBackend {
                     "atom_{} = create_atom(\"{}\", {})",
                     id, name, arity
                 ));
-                match data {
-                    Data::Empty => {}
-                    Data::Int(i) => {
-                        code.push_str(&format!("\n{}", " ".repeat(indent)));
-                        code.push_str(&format!("atom_{}.set_int({})", id, i));
-                    }
-                    Data::Float(f) => {
-                        code.push_str(&format!("\n{}", " ".repeat(indent)));
-                        code.push_str(&format!("atom_{}.set_float({})", id, f));
-                    }
-                    Data::Char(c) => {
-                        code.push_str(&format!("\n{}", " ".repeat(indent)));
-                        code.push_str(&format!("atom_{}.set_char({})", id, c));
-                    }
-                    Data::String(s) => {
-                        code.push_str(&format!("\n{}", " ".repeat(indent)));
-                        code.push_str(&format!("atom_{}.set_str(\"{}\")", id, s));
+                if !data.is_empty() {
+                    code.push_str(&format!("\n{}", " ".repeat(indent)));
+                    match data {
+                        Data::Int(i) => {
+                            code.push_str(&format!("atom_{}.set_int({})", id, i));
+                        }
+                        Data::Float(f) => {
+                            code.push_str(&format!("atom_{}.set_float({})", id, f));
+                        }
+                        Data::Char(c) => {
+                            code.push_str(&format!("atom_{}.set_char({})", id, c));
+                        }
+                        Data::String(s) => {
+                            code.push_str(&format!("atom_{}.set_string(\"{}\")", id, s));
+                        }
+                        Data::Variable(var_id) => {
+                            let ty = self.var_type.get(&(*var_id).into()).unwrap();
+                            code.push_str(&format!(
+                                "atom_{}.set_{}(var_{})",
+                                id,
+                                atom_type_to_string(ty),
+                                var_id
+                            ));
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -87,15 +101,9 @@ impl PythonBackend {
                 ));
             }
             LMNtalIR::CheckValue(op) => code.push_str(&print_operation(op)),
-            LMNtalIR::DefineTempVar { id, name, ty, op } => {
-                code.push_str(&format!("temp_{} = create_atom(\"{}\", 1)\n", id, name));
-                code.push_str(&format!(
-                    "{}temp_{}.set_{}({})",
-                    " ".repeat(indent),
-                    id,
-                    atom_type_to_string(ty),
-                    print_operation(op)
-                ));
+            LMNtalIR::DefineTempVar { id, ty, op, .. } => {
+                code.push_str(&format!("var_{} = {}", id, print_operation(op)));
+                self.var_type.insert(*id, *ty);
             }
             LMNtalIR::CloneAtom { id, from } => {
                 code.push_str(&format!("atom_{} = clone_atom(atom_{})", id, from));
@@ -360,14 +368,20 @@ fn print_operation(op: &Operation) -> String {
             Literal::String(s) => format!("str(\"{}\")", s),
         },
         Operation::Variable { source, ty_ } => match source {
-            crate::ir::VarSource::Head(id, port) | crate::ir::VarSource::Body(id, port) => format!(
-                "atom_{}.at({}).get_{}()",
-                id,
-                port,
-                atom_type_to_string(ty_)
-            ),
-            crate::ir::VarSource::Definition(id) => {
-                format!("atom_{}.get_{}()", id, atom_type_to_string(ty_),)
+            crate::ir::VarSource::Head(id, port) | crate::ir::VarSource::Body(id, port) => {
+                if *ty_ == ProcessConstraint::Hyperlink {
+                    format!("get_hyperlink_at_port(atom_{}, {})", id, port)
+                } else {
+                    format!(
+                        "atom_{}.at({}).get_{}()",
+                        id,
+                        port,
+                        atom_type_to_string(ty_)
+                    )
+                }
+            }
+            crate::ir::VarSource::Variable(id) => {
+                format!("var_{}", id)
             }
         },
         Operation::BinaryOP { op, lhs, rhs } => {
@@ -400,6 +414,23 @@ fn print_operation(op: &Operation) -> String {
                 print_operation(operand)
             )
         }
+        Operation::FunctionCall { name, args, ty_ } => {
+            if crate::data::guard::RESERVED_FUNC
+                .iter()
+                .any(|func| func.name == name)
+            {
+                print_reserved_func(name, args, ty_)
+            } else {
+                format!("{}({})", name, args.len())
+            }
+        }
+    }
+}
+
+fn print_reserved_func(name: &str, args: &[Operation], _type: &ProcessConstraint) -> String {
+    match name {
+        "num" => format!("{}.arity()", print_operation(&args[0])),
+        _ => unimplemented!(),
     }
 }
 

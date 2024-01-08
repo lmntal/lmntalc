@@ -4,7 +4,7 @@ use std::fmt::Display;
 
 use crate::transform::{SolveResult, Storage, TransformError};
 
-use super::guard::{GuardNode, GuardSource, ProcessConstraint};
+use super::guard::{GuardNode, GuardSource, ProcessConstraint, VariableId};
 use super::{guard::Guard, Atom, Data, Link, Membrane};
 
 use super::id::*;
@@ -52,8 +52,8 @@ pub struct Rule {
     membranes: HashMap<MembraneId, Membrane>,
     atoms: HashMap<AtomId, RuleAtom>,
     hyperlinks: HashMap<HyperlinkId, RuleHyperlink>,
-    definitions: HashMap<AtomId, RuleAtom>,
-    def_name: HashMap<String, AtomId>,
+    var_atoms: HashMap<VariableId, Vec<AtomId>>,
+    vars: HashMap<AtomId, RuleAtom>,
 
     id_generator: IdGenerator,
 }
@@ -321,18 +321,15 @@ impl Rule {
             .collect()
     }
 
+    pub(crate) fn var_atoms(&self) -> HashMap<AtomId, &RuleAtom> {
+        self.vars.iter().map(|(id, atom)| (*id, atom)).collect()
+    }
+
     pub(crate) fn body_atoms(&self) -> HashMap<AtomId, &RuleAtom> {
         self.membranes[&self.body]
             .atoms
             .iter()
             .map(move |id| (*id, &self.atoms[id]))
-            .collect()
-    }
-
-    pub(crate) fn definitions(&self) -> HashMap<AtomId, &RuleAtom> {
-        self.definitions
-            .iter()
-            .map(|(id, atom)| (*id, atom))
             .collect()
     }
 
@@ -364,25 +361,6 @@ impl Rule {
     pub(crate) fn set_body(&mut self, body: MembraneId) {
         self.body = body;
         self.body_membranes.insert(body);
-    }
-
-    /// Register a definition and return its id
-    ///
-    /// Return `None` if the definition is already registered or the name is invalid
-    pub(crate) fn register_def(&mut self, name: &str) -> AtomId {
-        let id = self.id_generator.next_atom_id(self.parent);
-        let atom = RuleAtom {
-            parent: self.parent,
-            name: name.to_owned(),
-            data: Data::Empty,
-            type_: None,
-            variable: true,
-            hyperlink: false,
-            args: vec![],
-        };
-        self.definitions.insert(id, atom);
-        self.def_name.insert(name.to_owned(), id);
-        id
     }
 
     pub(super) fn solve(&mut self) -> SolveResult {
@@ -437,8 +415,21 @@ impl Rule {
                         link.opposite_type = Some(ProcessConstraint::Hyperlink);
                     }
                 } else {
-                    if let Some(def_id) = self.def_name.get(&link.name) {
-                        link.opposite = RuleLinkArg::Temp(*def_id, 0);
+                    if let Some(var_id) = self.guard.defined(&link.name) {
+                        // create new atom for every variable
+                        let id = self.id_generator.next_atom_id(self.parent);
+                        let atom = RuleAtom {
+                            parent: self.parent,
+                            name: link.name.to_owned(),
+                            data: Data::Variable(var_id),
+                            type_: None,
+                            variable: true,
+                            hyperlink: false,
+                            args: vec![],
+                        };
+                        self.var_atoms.entry(var_id).or_default().push(id);
+                        self.vars.insert(id, atom);
+                        link.opposite = RuleLinkArg::Temp(id, 0);
                     }
                     if connected.contains(&link.name) {
                         // link with the same name already connected
@@ -480,7 +471,7 @@ impl Rule {
 
         for constraint in guard.constraints.iter_mut() {
             match constraint {
-                GuardNode::Func(func, vars) => {
+                GuardNode::Constraint(func, vars) => {
                     'var: for var in vars.iter_mut() {
                         if let GuardSource::Placeholder(name) = var {
                             for link in free_links {
@@ -506,7 +497,8 @@ impl Rule {
 
         'def: for def in guard.definitions.iter_mut() {
             // do special handling for definitions with only one item
-            match def.1 {
+            let var = def.1;
+            match &mut var.node {
                 GuardNode::Var(var) => {
                     if let GuardSource::Placeholder(name) = var {
                         for link in free_links {
@@ -520,24 +512,28 @@ impl Rule {
                         panic!("Unconstrained link in guard");
                     }
                 }
-                GuardNode::Int(i) => {
-                    let atom = self.definitions.get_mut(def.0).unwrap();
-                    atom.data = Data::Int(*i);
-                }
-                GuardNode::Float(f) => {
-                    let atom = self.definitions.get_mut(def.0).unwrap();
-                    atom.data = Data::Float(*f);
-                }
                 GuardNode::Binary(op, lhs, rhs) => {
                     let op = *op;
                     let _left =
                         self.substitute_link_in_guard_with_type(lhs, &op.into(), free_links);
                     let _right =
                         self.substitute_link_in_guard_with_type(rhs, &op.into(), free_links);
-                    let atom = self.definitions.get_mut(def.0).unwrap();
-                    atom.type_ = Some(op.into());
+                    var.ty = Some(op.into());
                 }
-                GuardNode::Func(..) => unreachable!(),
+                GuardNode::Function(sig, args) => {
+                    var.ty = Some(sig.ret);
+                    for arg in args {
+                        let _ =
+                            self.substitute_link_in_guard_with_type(arg, &sig.args[0], free_links);
+                    }
+                }
+                GuardNode::Constraint(..) => unreachable!(),
+                GuardNode::Int(_) => {
+                    var.ty = Some(ProcessConstraint::Int);
+                }
+                GuardNode::Float(_) => {
+                    var.ty = Some(ProcessConstraint::Float);
+                }
             }
         }
 
@@ -566,14 +562,18 @@ impl Rule {
                             atom.args[*idx].opposite_type = Some(*type_);
                         }
                     }
-                    GuardSource::Definition(def) => {
-                        let atom = self.definitions.get_mut(def).unwrap();
-                        if let Some(opposite_type) = atom.type_ {
-                            if opposite_type != *type_ {
-                                panic!("Type mismatch in guard");
+                    GuardSource::Variable(def) => {
+                        if let Some(atoms) = self.var_atoms.get(def) {
+                            for atom in atoms {
+                                let atom = self.atoms.get_mut(atom).unwrap();
+                                if let Some(opposite_type) = atom.type_ {
+                                    if opposite_type != *type_ {
+                                        panic!("Type mismatch in guard");
+                                    }
+                                } else {
+                                    atom.type_ = Some(*type_);
+                                }
                             }
-                        } else {
-                            atom.type_ = Some(*type_);
                         }
                     }
                     GuardSource::Placeholder(name) => {
@@ -586,12 +586,11 @@ impl Rule {
                                 }
                             }
                         }
-                        if substitute.is_none() {
-                            for (id, atom) in self.definitions.iter_mut() {
-                                if atom.name == *name {
-                                    atom.type_ = Some(*type_);
-                                    substitute = Some(GuardSource::Definition(*id));
-                                }
+                        for hl in self.hyperlinks.values() {
+                            if hl.name == *name {
+                                let op = hl.args[0].opposite;
+                                let (id, idx) = op.id_index().unwrap();
+                                substitute = Some(GuardSource::AtPortOfAtom(id, idx));
                             }
                         }
                     }
@@ -605,7 +604,7 @@ impl Rule {
             }
             GuardNode::Int(_) => ProcessConstraint::Int,
             GuardNode::Float(_) => ProcessConstraint::Float,
-            GuardNode::Func(_, _) => {
+            GuardNode::Constraint(_, _) => {
                 unreachable!("Function in expression is not supported yet")
             }
             GuardNode::Binary(op, lhs, rhs) => {
@@ -616,6 +615,12 @@ impl Rule {
                     panic!("Type mismatch in guard");
                 }
                 lhs_type
+            }
+            GuardNode::Function(sig, args) => {
+                for arg in args {
+                    let _ = self.substitute_link_in_guard_with_type(arg, &sig.args[0], free_links);
+                }
+                sig.ret
             }
         }
     }
@@ -636,7 +641,7 @@ impl Rule {
             let name = atom.args[1].name.clone();
 
             if let Some((id, idx)) = left.id_index() {
-                if !self.definitions.contains_key(&id) {
+                if !self.vars.contains_key(&id) {
                     let atom = self.atoms.get_mut(&id).unwrap();
                     atom.args[idx].opposite = right;
                     atom.args[idx].name = name.clone();
@@ -644,7 +649,7 @@ impl Rule {
             }
 
             if let Some((id, idx)) = right.id_index() {
-                if !self.definitions.contains_key(&id) {
+                if !self.vars.contains_key(&id) {
                     let atom = self.atoms.get_mut(&id).unwrap();
                     atom.args[idx].opposite = left;
                     atom.args[idx].name = name.clone();

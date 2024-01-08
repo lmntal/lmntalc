@@ -229,7 +229,7 @@ impl Display for LMNtalIR {
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum VarSource {
     Head(usize, usize),
-    Definition(usize),
+    Variable(usize),
     Body(usize, usize),
 }
 
@@ -237,7 +237,7 @@ impl VarSource {
     pub fn id(&self) -> usize {
         match self {
             VarSource::Head(id, _) => *id,
-            VarSource::Definition(id) => *id,
+            VarSource::Variable(id) => *id,
             VarSource::Body(id, _) => *id,
         }
     }
@@ -247,7 +247,7 @@ impl Display for VarSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             VarSource::Head(id, port) => write!(f, "head {} port {}", id.underline().bold(), port),
-            VarSource::Definition(id) => write!(f, "temp {}", id.underline().bold()),
+            VarSource::Variable(id) => write!(f, "temp {}", id.underline().bold()),
             VarSource::Body(id, port) => write!(f, "body {} port {}", id.underline().bold(), port),
         }
     }
@@ -269,6 +269,11 @@ pub enum Operation {
         op: UnaryOperator,
         operand: Box<Operation>,
     },
+    FunctionCall {
+        name: String,
+        args: Vec<Operation>,
+        ty_: ProcessConstraint,
+    },
 }
 
 impl Display for Operation {
@@ -285,7 +290,7 @@ impl Display for Operation {
                         ty_
                     )
                 }
-                VarSource::Definition(id) => {
+                VarSource::Variable(id) => {
                     write!(f, "(var at {} with type {})", id.underline().bold(), ty_)
                 }
                 VarSource::Body(id, port) => {
@@ -300,6 +305,17 @@ impl Display for Operation {
             },
             Operation::BinaryOP { op, lhs, rhs } => write!(f, "({} {} {})", lhs, op, rhs),
             Operation::UnaryOP { op, operand } => write!(f, "({} {})", op, operand),
+            Operation::FunctionCall { name, args, .. } => {
+                write!(
+                    f,
+                    "{}({})",
+                    name,
+                    args.iter()
+                        .map(|a| format!("{}", a))
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                )
+            }
         }
     }
 }

@@ -10,7 +10,7 @@ use std::{
 
 use crate::transform::{SolveResult, Storage, TransformError};
 
-use self::rule::Rule;
+use self::{guard::VariableId, rule::Rule};
 
 use id::*;
 
@@ -128,6 +128,13 @@ pub enum Data {
     Float(f64),
     Char(char),
     String(String),
+    Variable(VariableId),
+}
+
+impl Data {
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Data::Empty)
+    }
 }
 
 impl Program {
@@ -338,6 +345,7 @@ impl Display for Data {
             Data::Float(fl) => write!(f, "{}", fl),
             Data::Char(c) => write!(f, "\'{}\'", c),
             Data::String(s) => write!(f, "\"{}\"", s),
+            Data::Variable(id) => write!(f, "{}", id),
         }
     }
 }
