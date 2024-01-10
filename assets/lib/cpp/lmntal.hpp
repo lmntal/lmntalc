@@ -33,6 +33,10 @@ public:
   virtual void set_at(size_t pos, Atom *atom) {
     throw std::runtime_error("Not supported");
   }
+  virtual bool is_int() const { return false; }
+  virtual int64_t get_int() const { throw std::runtime_error("Not supported"); }
+  virtual bool is_float() const { return false; }
+  virtual double get_float() const { throw std::runtime_error("Not supported"); }
   std::string label;
 };
 
@@ -60,18 +64,18 @@ public:
   [[nodiscard]] auto is_plain() const -> bool {
     return type == atom_type::Plain;
   }
-  [[nodiscard]] auto is_int() const -> bool { return type == atom_type::Int; }
-  [[nodiscard]] auto get_int() const -> int64_t {
+  [[nodiscard]] auto is_int() const -> bool override { return type == atom_type::Int; }
+  [[nodiscard]] auto get_int() const -> int64_t override {
     return *static_cast<int64_t *>(data);
   }
   void set_int(int64_t value) {
     data = new int64_t{value};
     type = atom_type::Int;
   }
-  [[nodiscard]] auto is_float() const -> bool {
+  [[nodiscard]] auto is_float() const -> bool override {
     return type == atom_type::Float;
   }
-  [[nodiscard]] auto get_float() const -> double {
+  [[nodiscard]] auto get_float() const -> double override {
     return *static_cast<double *>(data);
   }
   void set_float(double value) {

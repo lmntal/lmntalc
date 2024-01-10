@@ -169,10 +169,10 @@ impl PythonBackend {
 
         code.push_str("    ]\n");
 
-        let rules = rules - 1;
+        let rules_minus_1 = rules - 1;
         code.push_str(&format!(
             r#"    while not all(rule_fail):
-        rand = random.randint(0, {rules})
+        rand = random.randint(0, {rules_minus_1})
         if rules[rand]():
             rule_fail = {rules} * [False]
         else:
