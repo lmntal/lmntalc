@@ -1,16 +1,10 @@
 pub mod rule;
 
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Display,
-};
+use std::{collections::HashMap, fmt::Display};
 
 use owo_colors::OwoColorize;
 
-use crate::{
-    data::{Data, Program},
-    ir::{self, LMNtalIR},
-};
+use crate::{data::Program, ir::LMNtalIR};
 
 use self::rule::{RuleGenerator, RuleIR};
 
@@ -51,91 +45,10 @@ impl Generator {
 
     /// Generate initialization function, e.g. `main()` in most languages
     fn gen_init(&mut self, program: &Program) {
-        let atoms = program.atoms(program.root());
-        let hyperlinks = program.hyperlinks();
-        let mut counter = 0;
-        let mut queue = vec![];
-        let mut atom_id_map = HashMap::new();
-
-        for (atom_id, atom) in &atoms {
-            self.create_atom(counter, &atom.name, atom.args.len(), atom.data.clone());
-            atom_id_map.insert(atom_id, counter);
-            counter += 1;
-        }
-
-        for (hl_id, hl) in hyperlinks {
-            self.create_hyperlink(counter, &hl.name);
-            atom_id_map.insert(hl_id, counter);
-            counter += 1;
-        }
-
-        for (this_id, atom) in &atoms {
-            for (this_port, arg) in atom.args.iter().enumerate() {
-                if let Some((op, port)) = arg.opposite {
-                    if hyperlinks.contains_key(&op) {
-                        queue.push(self.hyperlink(
-                            atom_id_map[this_id],
-                            this_port,
-                            atom_id_map[&op],
-                        ));
-                    } else {
-                        queue.push(self.link(
-                            atom_id_map[this_id],
-                            this_port,
-                            atom_id_map[&op],
-                            port,
-                        ));
-                    }
-                }
-            }
-        }
-
-        let mut exists: HashSet<(_, _)> = HashSet::new();
-
-        while let Some(link) = queue.pop() {
-            if let LMNtalIR::Link { src, dst } = link {
-                if exists.contains(&(src, dst)) {
-                    continue;
-                }
-                exists.insert((dst, src)); // reverse link
-                self.init.push(link);
-            } else {
-                self.init.push(link);
-            }
-        }
-    }
-}
-
-/// Functions for generating single LMNtalIR
-impl Generator {
-    fn create_hyperlink(&mut self, id: usize, name: &str) {
-        self.init.push(LMNtalIR::CreateHyperlink {
-            id,
-            name: name.to_string(),
-        });
-    }
-
-    fn create_atom(&mut self, id: usize, name: &str, arity: usize, data: Data) {
-        self.init.push(LMNtalIR::CreateAtom {
-            id,
-            name: name.to_string(),
-            arity,
-            data,
-        });
-    }
-
-    fn link(&mut self, src: usize, src_port: usize, dst: usize, dst_port: usize) -> LMNtalIR {
-        LMNtalIR::Link {
-            src: ir::VarSource::Head(src, src_port),
-            dst: ir::VarSource::Head(dst, dst_port),
-        }
-    }
-
-    fn hyperlink(&mut self, atom: usize, atom_port: usize, hl: usize) -> LMNtalIR {
-        LMNtalIR::LinkToHyperlink {
-            atom: ir::VarSource::Head(atom, atom_port),
-            hyperlink: ir::VarSource::Head(hl, 0),
-        }
+        let rule = program.init_rule();
+        let mut rule_gen = RuleGenerator::new(rule);
+        let ir = rule_gen.generate();
+        self.init = ir.init();
     }
 }
 

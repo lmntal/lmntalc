@@ -8,36 +8,6 @@ use crate::{
 use self::guard::visit_guard;
 use super::data::id::*;
 
-/// A trait for storage, which is used to store atoms, membranes, rules, links, and hyperlinks
-///
-/// This trait is used to abstract the storage of the program.
-/// In LMNtal, the "global" storage is the root membrane, and the "local" storage is the `Rule`.
-pub(crate) trait Storage {
-    /// Generate a new id for a membrane
-    fn next_membrane_id(&mut self) -> MembraneId;
-    /// Generate a new id for an atom
-    fn next_atom_id(&mut self, parent: MembraneId) -> AtomId;
-
-    /// Generate a temporary link and return its id
-    fn temp_link_name(&mut self) -> String;
-
-    /// Add a new atom to the storage
-    fn add_atom(&mut self, id: AtomId, atom: Atom);
-    /// Add a new membrane to the storage
-    fn add_membrane(&mut self, id: MembraneId, membrane: Membrane);
-    /// Add a new rule to the storage and return its id
-    fn add_rule(&mut self, rule: Rule, parent: MembraneId) -> RuleId;
-    /// Add a new hyperlink to the storage and return its id.
-    ///
-    /// if the hyperlink already exists, return its id
-    fn add_hyperlink(&mut self, name: &str) -> HyperlinkId;
-
-    fn get_atom_arg_len(&self, id: AtomId) -> usize;
-    fn get_hyperlink_arg_len(&self, id: HyperlinkId) -> usize;
-    fn append_atom_arg(&mut self, id: AtomId, link: Link);
-    fn append_hyperlink_arg(&mut self, id: HyperlinkId, link: Link);
-}
-
 #[derive(Debug)]
 pub enum TransformError {
     TopLevelLink,
@@ -90,10 +60,26 @@ pub fn transform_lmntal(ast: &ASTNode) -> TransformResult {
         program.set_root(root);
         let mut mem = Membrane::new(name.clone(), void);
 
+        let mut init = Rule::new("_init".to_string(), root);
+
+        let head_id = init.next_membrane_id();
+        let head = Membrane::new("_head".to_string(), root);
+        init.set_head(head_id);
+        init.add_membrane(head_id, head);
+        init.set_head_parsed();
+
+        let body_id = init.next_membrane_id();
+        let mut body = Membrane::new("_body".to_string(), root);
+
         for process_list in process_lists {
-            let processes = visit_process_list(process_list, &mut program, root);
-            mem.add_processes(processes);
+            let processes = visit_process_list(process_list, &mut init, body_id);
+            body.add_processes(processes);
         }
+
+        init.set_body(body_id);
+        init.add_membrane(body_id, body);
+
+        program.set_init_rule(init);
 
         for rule in rules {
             let rule = visit_rule(rule, root);
@@ -171,11 +157,7 @@ fn visit_rule(node: &ASTNode, mem_id: MembraneId) -> Rule {
 }
 
 /// Visit a process list node and transform it into a vector of processes
-fn visit_process_list(
-    node: &ASTNode,
-    store: &mut impl Storage,
-    mem_id: MembraneId,
-) -> Vec<Process> {
+fn visit_process_list(node: &ASTNode, store: &mut Rule, mem_id: MembraneId) -> Vec<Process> {
     let mut proc_list = vec![];
     if let ASTNode::ProcessList { processes, .. } = node {
         for process in processes {
@@ -189,7 +171,7 @@ fn visit_process_list(
 
 fn visit_process(
     node: &ASTNode,
-    store: &mut impl Storage,
+    store: &mut Rule,
     processes: &mut Vec<Process>,
     mem_id: MembraneId,
 ) {
@@ -216,7 +198,7 @@ fn visit_process(
 /// Returns the index of the atom in the holder
 fn visit_atom(
     node: &ASTNode,
-    store: &mut impl Storage,
+    rule: &mut Rule,
     processes: &mut Vec<Process>,
     mem_id: MembraneId,
 ) -> AtomId {
@@ -229,7 +211,7 @@ fn visit_atom(
             AtomName::Char(c) => ("_char".to_owned(), Data::Char(*c)),
         };
 
-        let id = store.next_atom_id(mem_id);
+        let id = rule.next_atom_id(mem_id);
         processes.push(Process::Atom(id));
 
         let mut links = vec![];
@@ -237,17 +219,17 @@ fn visit_atom(
         for (idx, arg) in args.iter().enumerate() {
             match arg {
                 ASTNode::Atom { .. } => {
-                    let inner_atom_id = visit_atom(arg, store, processes, mem_id);
-                    let temp_name = store.temp_link_name();
+                    let inner_atom_id = visit_atom(arg, rule, processes, mem_id);
+                    let temp_name = rule.temp_link_name();
 
-                    let length = store.get_atom_arg_len(inner_atom_id);
+                    let length = rule.get_atom_arg_len(inner_atom_id);
                     let inner_pair = (inner_atom_id, length);
                     let link_for_inner = Link {
                         name: temp_name.clone(),
                         this: inner_pair,
                         opposite: Some((id, idx)),
                     };
-                    store.append_atom_arg(inner_atom_id, link_for_inner);
+                    rule.append_atom_arg(inner_atom_id, link_for_inner);
 
                     let link = Link {
                         name: temp_name,
@@ -262,10 +244,10 @@ fn visit_atom(
                 } => {
                     if *hyperlink {
                         let name = format!("!{}", name);
-                        let hl_id = store.add_hyperlink(&name);
-                        let temp_name = store.temp_link_name();
+                        let hl_id = rule.add_hyperlink(&name);
+                        let temp_name = rule.temp_link_name();
 
-                        let length = store.get_hyperlink_arg_len(hl_id);
+                        let length = rule.get_hyperlink_arg_len(hl_id);
                         let this_pair = (id, idx);
                         let hl_pair = (hl_id, length);
                         let link_for_inner = Link {
@@ -273,7 +255,7 @@ fn visit_atom(
                             this: hl_pair,
                             opposite: Some(this_pair),
                         };
-                        store.append_hyperlink_arg(hl_id, link_for_inner);
+                        rule.append_hyperlink_arg(hl_id, link_for_inner);
 
                         let link = Link {
                             name: temp_name,
@@ -303,7 +285,7 @@ fn visit_atom(
             data,
         };
 
-        store.add_atom(id, atom);
+        rule.add_atom(id, atom);
         id
     } else {
         unreachable!("visit_atom called with non-atom node")
@@ -313,7 +295,7 @@ fn visit_atom(
 /// Visit a membrane node and add it to the holder
 ///
 /// Returns the index of the membrane in the holder
-fn visit_membrane(node: &ASTNode, store: &mut impl Storage, mem_id: MembraneId) -> MembraneId {
+fn visit_membrane(node: &ASTNode, store: &mut Rule, mem_id: MembraneId) -> MembraneId {
     if let ASTNode::Membrane {
         name,
         process_lists,

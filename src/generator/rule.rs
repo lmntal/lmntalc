@@ -33,8 +33,15 @@ pub struct RuleGenerator<'rule> {
 #[derive(Debug)]
 pub struct RuleIR {
     pub name: String,
-    pub cases: Vec<Case>,
     pub pattern: Vec<LMNtalIR>,
+    pub cases: Vec<Case>,
+}
+
+impl RuleIR {
+    /// Compiler hole, do not use
+    pub(crate) fn init(self) -> Vec<LMNtalIR> {
+        self.cases.into_iter().flat_map(|c| c.body).collect()
+    }
 }
 
 impl<'rule> RuleGenerator<'rule> {

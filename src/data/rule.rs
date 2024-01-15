@@ -2,7 +2,7 @@ use core::panic;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 
-use crate::transform::{SolveResult, Storage, TransformError};
+use crate::transform::{SolveResult, TransformError};
 
 use super::guard::{GuardNode, GuardSource, ProcessConstraint, VariableId};
 use super::{guard::Guard, Atom, Data, Link, Membrane};
@@ -196,21 +196,21 @@ impl Display for RuleLinkArg {
     }
 }
 
-impl Storage for Rule {
-    fn next_membrane_id(&mut self) -> MembraneId {
+impl Rule {
+    pub(crate) fn next_membrane_id(&mut self) -> MembraneId {
         self.id_generator.next_membrane_id()
     }
 
-    fn next_atom_id(&mut self, parent: MembraneId) -> AtomId {
+    pub(crate) fn next_atom_id(&mut self, parent: MembraneId) -> AtomId {
         self.id_generator.next_atom_id(parent)
     }
 
-    fn temp_link_name(&mut self) -> String {
+    pub(crate) fn temp_link_name(&mut self) -> String {
         let id = self.id_generator.next_link_id();
         format!("~temp{}", id.id())
     }
 
-    fn add_membrane(&mut self, id: MembraneId, membrane: Membrane) {
+    pub(crate) fn add_membrane(&mut self, id: MembraneId, membrane: Membrane) {
         if self.head_membranes.contains(&membrane.parent) {
             self.head_membranes.insert(id);
         } else if self.body_membranes.contains(&membrane.parent) {
@@ -219,7 +219,7 @@ impl Storage for Rule {
         self.membranes.insert(id, membrane);
     }
 
-    fn add_atom(&mut self, id: AtomId, atom: Atom) {
+    pub(crate) fn add_atom(&mut self, id: AtomId, atom: Atom) {
         let atom = RuleAtom {
             parent: atom.parent,
             name: atom.name,
@@ -254,11 +254,11 @@ impl Storage for Rule {
     }
 
     #[allow(unused_variables)]
-    fn add_rule(&mut self, rule: Rule, parent: MembraneId) -> super::RuleId {
+    pub(crate) fn add_rule(&mut self, rule: Rule, parent: MembraneId) -> super::RuleId {
         unimplemented!("Generating rules in rules is not supported")
     }
 
-    fn add_hyperlink(&mut self, name: &str) -> super::HyperlinkId {
+    pub(crate) fn add_hyperlink(&mut self, name: &str) -> super::HyperlinkId {
         for (id, link_) in &mut self.hyperlinks {
             if link_.name == name {
                 return *id;
@@ -275,15 +275,15 @@ impl Storage for Rule {
         id
     }
 
-    fn get_atom_arg_len(&self, id: AtomId) -> usize {
+    pub(crate) fn get_atom_arg_len(&self, id: AtomId) -> usize {
         self.atoms.get(&id).map_or(0, |atom| atom.args.len())
     }
 
-    fn get_hyperlink_arg_len(&self, id: HyperlinkId) -> usize {
+    pub(crate) fn get_hyperlink_arg_len(&self, id: HyperlinkId) -> usize {
         self.hyperlinks.get(&id).map_or(0, |link| link.args.len())
     }
 
-    fn append_atom_arg(&mut self, id: AtomId, link: Link) {
+    pub(crate) fn append_atom_arg(&mut self, id: AtomId, link: Link) {
         self.atoms.get_mut(&id).unwrap().args.push(RuleLink::from(
             &link,
             !self.head_parsed,
@@ -291,7 +291,7 @@ impl Storage for Rule {
         ));
     }
 
-    fn append_hyperlink_arg(&mut self, id: HyperlinkId, link: Link) {
+    pub(crate) fn append_hyperlink_arg(&mut self, id: HyperlinkId, link: Link) {
         self.hyperlinks
             .get_mut(&id)
             .unwrap()
