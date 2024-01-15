@@ -113,13 +113,6 @@ impl MembraneId {
     }
 }
 
-/// A unique identifier for a link, which is a 64-bit unsigned integer
-///
-/// Because links will be finally eliminated, and they don't belong to any membrane,
-/// so we don't need to store the parent membrane ID in the link ID.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct LinkId(u64);
-
 /// Hyperlink is actually an atom, but it is not stored in the atom table.
 pub type HyperlinkId = AtomId;
 
@@ -129,8 +122,7 @@ id_with_parent! {
 }
 
 id_without_parent! {
-    MembraneId, u32,
-    LinkId, u64
+    MembraneId, u32
 }
 
 #[derive(Debug, Default, Clone)]
@@ -159,9 +151,9 @@ impl IdGenerator {
         RuleId::new(parent.into(), *counter)
     }
 
-    pub(super) fn next_link_id(&mut self) -> LinkId {
+    pub(super) fn next_link_id(&mut self) -> u64 {
         self.link_counter += 1;
-        LinkId::new(self.link_counter - 1)
+        self.link_counter - 1
     }
 
     pub(super) fn next_hyperlink_id(&mut self) -> HyperlinkId {

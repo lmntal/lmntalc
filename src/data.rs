@@ -3,7 +3,7 @@ pub mod id;
 pub mod rule;
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     fmt::Display,
     hash::{Hash, Hasher},
 };
@@ -16,56 +16,25 @@ use id::*;
 
 #[derive(Debug, Default)]
 pub struct Program {
-    root: MembraneId,
-
-    membranes: HashMap<MembraneId, Membrane>,
+    root_rules: Vec<Rule>,
     init_rule: Rule,
-    rules: HashMap<RuleId, Rule>,
-
-    id_generator: id::IdGenerator,
 }
 
 impl Program {
-    pub(crate) fn set_root(&mut self, root: MembraneId) {
-        self.root = root;
-    }
-
-    pub fn root(&self) -> MembraneId {
-        self.root
-    }
-
-    pub fn membranes(&self, membrane: MembraneId) -> Vec<&Membrane> {
-        self.membranes.get(&membrane).map_or(Vec::new(), |mem| {
-            mem.membranes.iter().map(|id| &self.membranes[id]).collect()
-        })
-    }
-
     pub(crate) fn set_init_rule(&mut self, rule: Rule) {
         self.init_rule = rule;
     }
 
-    pub fn init_rule(&self) -> &Rule {
+    pub(crate) fn init_rule(&self) -> &Rule {
         &self.init_rule
     }
 
-    pub fn rules(&self, membrane: MembraneId) -> Vec<Rule> {
-        self.membranes.get(&membrane).map_or(vec![], |mem| {
-            mem.rules.iter().map(|id| self.rules[id].clone()).collect()
-        })
+    pub(crate) fn root_rules(&self) -> &Vec<Rule> {
+        &self.root_rules
     }
 
-    pub(crate) fn add_membrane(&mut self, id: MembraneId, membrane: Membrane) {
-        self.membranes.insert(id, membrane);
-    }
-
-    pub(crate) fn add_rule(&mut self, rule: Rule, parent: MembraneId) -> RuleId {
-        let id = self.id_generator.next_rule_id(parent);
-        self.rules.insert(id, rule);
-        id
-    }
-
-    pub(crate) fn next_membrane_id(&mut self) -> MembraneId {
-        self.id_generator.next_membrane_id()
+    pub(crate) fn add_rule(&mut self, rule: Rule) {
+        self.root_rules.push(rule);
     }
 }
 
@@ -83,12 +52,6 @@ pub enum Process {
     ///
     /// The second usize is the id of the membrane
     Membrane(MembraneId),
-    /// A link in a membrane
-    ///
-    /// The first usize is the id of the parent membrane
-    ///
-    /// The second usize is the id of the link
-    Link(LinkId),
     /// A hyperlink in a membrane
     ///
     /// The first usize is the id of the parent membrane
@@ -150,13 +113,11 @@ impl Data {
 
 impl Program {
     pub(crate) fn solve(&mut self) -> SolveResult {
-        let root = self.membranes.get_mut(&self.root).unwrap().clone();
         let mut res = SolveResult::default();
 
         res.combine(self.init_rule.solve());
 
-        for rule in root.rules.iter() {
-            let rule = self.rules.get_mut(rule).unwrap();
+        for rule in &mut self.root_rules {
             res.combine(rule.solve());
         }
 
@@ -214,7 +175,6 @@ impl Process {
         match self {
             Self::Atom(id) => (*id).into(),
             Self::Membrane(id) => id.id().into(),
-            Self::Link(id) => (*id).into(),
             Self::Hyperlink(id) => (*id).into(),
         }
     }
@@ -231,10 +191,6 @@ impl Hash for Process {
                 state.write_u8(1);
                 id.hash(state);
             }
-            Self::Link(id) => {
-                state.write_u8(2);
-                id.hash(state);
-            }
             Self::Hyperlink(id) => {
                 state.write_u8(3);
                 id.hash(state);
@@ -248,7 +204,6 @@ impl PartialEq for Process {
         match (self, other) {
             (Self::Atom(l0), Self::Atom(r0)) => l0 == r0,
             (Self::Membrane(l0), Self::Membrane(r0)) => l0 == r0,
-            (Self::Link(l0), Self::Link(r0)) => l0 == r0,
             _ => false,
         }
     }

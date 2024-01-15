@@ -207,7 +207,7 @@ impl Rule {
 
     pub(crate) fn temp_link_name(&mut self) -> String {
         let id = self.id_generator.next_link_id();
-        format!("~temp{}", id.id())
+        format!("~temp{}", id)
     }
 
     pub(crate) fn add_membrane(&mut self, id: MembraneId, membrane: Membrane) {

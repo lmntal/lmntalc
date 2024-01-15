@@ -48,17 +48,13 @@ pub fn transform_lmntal(ast: &ASTNode) -> TransformResult {
     let mut warnings = vec![];
 
     if let ASTNode::Membrane {
-        name,
         process_lists,
         rules,
         ..
     } = ast
     {
         // root means void, since the "root membrane" has no parent
-        let void = MembraneId::void();
-        let root = program.next_membrane_id();
-        program.set_root(root);
-        let mut mem = Membrane::new(name.clone(), void);
+        let root = MembraneId::new(0);
 
         let mut init = Rule::new("_init".to_string(), root);
 
@@ -83,11 +79,8 @@ pub fn transform_lmntal(ast: &ASTNode) -> TransformResult {
 
         for rule in rules {
             let rule = visit_rule(rule, root);
-            let rule = program.add_rule(rule, root);
-            mem.add_rule(rule);
+            program.add_rule(rule);
         }
-
-        program.add_membrane(root, mem);
     } else {
         unreachable!("visit_membrane called with non-membrane node")
     }

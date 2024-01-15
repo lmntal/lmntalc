@@ -30,7 +30,7 @@ impl Generator {
 
     fn gen_rules(&mut self, program: &Program) {
         let mut names = HashMap::new();
-        for rule in &program.rules(program.root()) {
+        for rule in program.root_rules() {
             let mut rule_gen = RuleGenerator::new(rule);
             let mut ir = rule_gen.generate();
             if let Some(count) = names.get_mut(&ir.name) {
