@@ -274,7 +274,6 @@ fn visit_atom(
             parent: mem_id,
             name: name.clone(),
             args: links,
-            hyperlink: false,
             data,
         };
 

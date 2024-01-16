@@ -76,7 +76,6 @@ pub struct Atom {
     pub parent: MembraneId,
     pub name: String,
     pub data: Data,
-    pub hyperlink: bool,
     pub args: Vec<Link>,
 }
 

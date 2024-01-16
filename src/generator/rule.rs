@@ -259,7 +259,10 @@ fn generate_case(
     }
 
     for c in &guard.constraints {
-        condition.push(LMNtalIR::CheckValue(transform_guard(c, rule, symbol_table)));
+        if let GuardNode::Constraint(_, _) = c {
+        } else {
+            condition.push(LMNtalIR::CheckValue(transform_guard(c, rule, symbol_table)));
+        }
     }
 
     for (var_id, var) in &guard.definitions {

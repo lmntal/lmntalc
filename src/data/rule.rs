@@ -15,9 +15,7 @@ pub struct RuleAtom {
     parent: MembraneId,
     name: String,
     data: Data,
-    variable: bool,
     type_: Option<ProcessConstraint>,
-    hyperlink: bool,
     args: Vec<RuleLink>,
 }
 
@@ -223,14 +221,12 @@ impl Rule {
         let atom = RuleAtom {
             parent: atom.parent,
             name: atom.name,
-            variable: false,
             type_: match &atom.data {
                 Data::Int(_) => Some(ProcessConstraint::Int),
                 Data::Float(_) => Some(ProcessConstraint::Float),
                 _ => None,
             },
             data: atom.data,
-            hyperlink: atom.hyperlink,
             args: atom
                 .args
                 .iter()
@@ -423,8 +419,6 @@ impl Rule {
                             name: link.name.to_owned(),
                             data: Data::Variable(var_id),
                             type_: None,
-                            variable: true,
-                            hyperlink: false,
                             args: vec![],
                         };
                         self.var_atoms.entry(var_id).or_default().push(id);
@@ -637,13 +631,16 @@ impl Rule {
         for connector in &connectors {
             let atom = self.atoms.get_mut(connector).unwrap();
             let left = atom.args[0].opposite;
+            let left_type = atom.args[0].opposite_type;
             let right = atom.args[1].opposite;
+            let right_type = atom.args[1].opposite_type;
             let name = atom.args[1].name.clone();
 
             if let Some((id, idx)) = left.id_index() {
                 if !self.vars.contains_key(&id) {
                     let atom = self.atoms.get_mut(&id).unwrap();
                     atom.args[idx].opposite = right;
+                    atom.args[idx].opposite_type = right_type;
                     atom.args[idx].name = name.clone();
                 }
             }
@@ -652,6 +649,7 @@ impl Rule {
                 if !self.vars.contains_key(&id) {
                     let atom = self.atoms.get_mut(&id).unwrap();
                     atom.args[idx].opposite = left;
+                    atom.args[idx].opposite_type = left_type;
                     atom.args[idx].name = name.clone();
                 }
             }
