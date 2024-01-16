@@ -4,13 +4,21 @@
 
 ## Features
 
-- Parsing LMNtal into AST
-- Transform LMNtal into more expressive intermediate model (WIP)
+- Full support of parsing HyperLMNtal.
+- Simple static analysis on parse tree level.
+- Support of compiling Flat HyperLMNtal to target languages.
+  - Currently, C++, Java, and Python are supported.
+
+## Behavioral Difference from [lmntal-compiler](https://github.com/lmntal/lmntal-compiler)
+
+### Expression
+
+`a + b` is the same with `'+'(a, b)` in lmntal-compiler,
+but they are different in LMNtalc.
 
 ## Known Issues
 
 - Rules in membranes in top level rule is not supported. **i.e.** Cannot generate membranes with rules.
-- Hyperlink is not fully supported yet.
 
 ## License
 
