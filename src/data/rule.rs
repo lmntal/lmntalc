@@ -362,6 +362,8 @@ impl Rule {
     pub(super) fn solve(&mut self) -> SolveResult {
         let mut free = vec![];
 
+        self.unification(self.head);
+
         let head = self.head;
         let mut res = self.solve_membrane(&head, &mut free);
 
@@ -371,10 +373,10 @@ impl Rule {
 
         self.solve_guard(&free);
 
+        self.unification(self.body);
+
         let body = self.body;
         res.combine(self.solve_membrane(&body, &mut free));
-
-        self.unification();
 
         if !free.is_empty() {
             res.errors.push(TransformError::UnconstrainedLink);
@@ -619,12 +621,19 @@ impl Rule {
         }
     }
 
-    fn unification(&mut self) {
+    fn unification(&mut self, mem_id: MembraneId) {
+        let membrane = self.membranes.get(&mem_id).unwrap().clone();
+
+        for mem in &membrane.membranes {
+            self.unification(*mem);
+        }
+
         let mut connectors = vec![];
 
-        for (atom_id, atom) in &self.atoms {
+        for atom_id in &membrane.atoms {
+            let atom = self.atoms.get(atom_id).unwrap();
             if atom.name == "=" && atom.args.len() == 2 {
-                connectors.push(*atom_id);
+                connectors.push(atom_id);
             }
         }
 
@@ -634,32 +643,48 @@ impl Rule {
             let left_type = atom.args[0].opposite_type;
             let right = atom.args[1].opposite;
             let right_type = atom.args[1].opposite_type;
-            let name = atom.args[1].name.clone();
+            let left_name = atom.args[0].name.clone();
+            let right_name = atom.args[1].name.clone();
 
-            if let Some((id, idx)) = left.id_index() {
-                if !self.vars.contains_key(&id) {
-                    let atom = self.atoms.get_mut(&id).unwrap();
-                    atom.args[idx].opposite = right;
-                    atom.args[idx].opposite_type = right_type;
-                    atom.args[idx].name = name.clone();
+            match (left.id_index(), right.id_index()) {
+                (Some((id, idx)), None) => {
+                    if !self.vars.contains_key(&id) {
+                        let atom = self.atoms.get_mut(&id).unwrap();
+                        atom.args[idx].opposite = right;
+                        atom.args[idx].opposite_type = right_type;
+                        atom.args[idx].name = right_name;
+                    }
                 }
-            }
-
-            if let Some((id, idx)) = right.id_index() {
-                if !self.vars.contains_key(&id) {
-                    let atom = self.atoms.get_mut(&id).unwrap();
-                    atom.args[idx].opposite = left;
-                    atom.args[idx].opposite_type = left_type;
-                    atom.args[idx].name = name.clone();
+                (None, Some((id, idx))) => {
+                    if !self.vars.contains_key(&id) {
+                        let atom = self.atoms.get_mut(&id).unwrap();
+                        atom.args[idx].opposite = left;
+                        atom.args[idx].opposite_type = left_type;
+                        atom.args[idx].name = left_name;
+                    }
                 }
+                (Some((left_id, left_idx)), Some((right_id, right_idx))) => {
+                    if !self.vars.contains_key(&left_id) {
+                        let left_atom = self.atoms.get_mut(&left_id).unwrap();
+                        left_atom.args[left_idx].opposite = right;
+                        left_atom.args[left_idx].opposite_type = right_type;
+                        left_atom.args[left_idx].name = right_name;
+                    }
+                    if !self.vars.contains_key(&right_id) {
+                        let right_atom = self.atoms.get_mut(&right_id).unwrap();
+                        right_atom.args[right_idx].opposite = left;
+                        right_atom.args[right_idx].opposite_type = left_type;
+                    }
+                }
+                (None, None) => {}
             }
+        }
 
+        let membrane = self.membranes.get_mut(&mem_id).unwrap();
+
+        for connector in &connectors {
             self.atoms.remove(connector);
-            let head = self.membranes.get_mut(&self.head).unwrap();
-            if !head.atoms.remove(connector) {
-                let body = self.membranes.get_mut(&self.body).unwrap();
-                body.atoms.remove(connector);
-            }
+            membrane.atoms.remove(connector);
         }
     }
 }
