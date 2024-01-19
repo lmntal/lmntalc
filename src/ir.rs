@@ -25,7 +25,11 @@ pub enum LMNtalIR {
     /// Remove an atom at specified `port` of atom with specified `id`
     RemoveAtomAt { id: usize, port: usize },
     /// Clone an atom from specified `from` atom with specified `id`
-    CloneAtom { id: usize, from: usize },
+    CloneAtom {
+        id: usize,
+        from_id: usize,
+        from_port: usize,
+    },
 
     /// Link atoms with specified ports
     Link { src: VarSource, dst: VarSource },
@@ -125,8 +129,18 @@ impl Display for LMNtalIR {
                 )
             }
             LMNtalIR::RemoveAtom { id } => write!(f, "remove atom at {}", id.underline().bold()),
-            LMNtalIR::CloneAtom { id, from } => {
-                write!(f, "clone atom into {} from {}", id.underline().bold(), from)
+            LMNtalIR::CloneAtom {
+                id,
+                from_id,
+                from_port,
+            } => {
+                write!(
+                    f,
+                    "clone atom into {} from {} port {} ",
+                    id.underline().bold(),
+                    from_id,
+                    from_port
+                )
             }
             LMNtalIR::Link { src, dst } => write!(f, "link {} with {}", src, dst,),
             LMNtalIR::Relink { src, src_port, dst } => {

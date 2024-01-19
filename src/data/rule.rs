@@ -296,6 +296,14 @@ impl Rule {
     }
 }
 
+/// Helper struct for solving rules
+#[derive(Debug, Clone, Copy)]
+struct LinkInfo {
+    this: RuleLinkArg,
+    this_type: Option<ProcessConstraint>,
+    opposite: RuleLinkArg,
+}
+
 impl Rule {
     pub(crate) fn new(name: String, mem_id: MembraneId) -> Self {
         Self {
@@ -360,23 +368,23 @@ impl Rule {
     }
 
     pub(super) fn solve(&mut self) -> SolveResult {
-        let mut free = vec![];
+        let mut free = HashMap::new();
 
         self.unification(self.head);
 
         let head = self.head;
-        let mut res = self.solve_membrane(&head, &mut free);
+        let mut res = self.solve_membrane(&head, &mut free, false);
 
         if let Some(propagation) = self.propagation {
-            res.combine(self.solve_membrane(&propagation, &mut free));
+            res.combine(self.solve_membrane(&propagation, &mut free, false));
         }
 
-        self.solve_guard(&free);
-
-        self.unification(self.body);
+        self.solve_guard(&mut free);
 
         let body = self.body;
-        res.combine(self.solve_membrane(&body, &mut free));
+        res.combine(self.solve_membrane(&body, &mut free, true));
+        
+        self.unification(self.body);
 
         if !free.is_empty() {
             res.errors.push(TransformError::UnconstrainedLink);
@@ -388,21 +396,20 @@ impl Rule {
     fn solve_membrane(
         &mut self,
         membrane_id: &MembraneId,
-        free_links: &mut Vec<RuleLink>,
+        free_links: &mut HashMap<String, LinkInfo>,
+        body: bool,
     ) -> SolveResult {
         let membrane = self.membranes.get_mut(membrane_id).unwrap().clone();
         let mut result = SolveResult::default();
         for mem in &membrane.membranes {
-            result.combine(self.solve_membrane(mem, free_links));
+            result.combine(self.solve_membrane(mem, free_links, body));
         }
 
         // fix links
 
-        let mut links = free_links
-            .iter()
-            .map(|link| (link.name.clone(), link.this))
-            .collect::<HashMap<_, _>>();
         let mut connected = HashSet::new();
+
+        // contains update info for links after solving
         let mut updates = vec![];
 
         for atom_id in &membrane.atoms {
@@ -430,15 +437,55 @@ impl Rule {
                     if connected.contains(&link.name) {
                         // link with the same name already connected
                         result.errors.push(TransformError::LinkTooManyOccurrence);
+                    } else if body {
+                        // handle constrainted links in body
+                        if let Some(cor_link) = free_links.get_mut(&link.name) {
+                            if cor_link.this_type.is_some() {
+                                link.opposite = cor_link.opposite;
+                            } else if let Some(other) = free_links.insert(
+                                link.name.clone(),
+                                LinkInfo {
+                                    this: link.opposite,
+                                    this_type: link.opposite_type,
+                                    opposite: link.this,
+                                },
+                            ) {
+                                updates.push((other.opposite, link.this));
+                                connected.insert(link.name.clone());
+                            }
+                        } else if let Some(other) = free_links.insert(
+                            link.name.clone(),
+                            LinkInfo {
+                                this: link.opposite,
+                                this_type: link.opposite_type,
+                                opposite: link.this,
+                            },
+                        ) {
+                            updates.push((other.opposite, link.this));
+                            connected.insert(link.name.clone());
+                        }
                     } else {
                         // link with the same name not connected
-                        if let Some(other) = links.insert(link.name.clone(), link.this) {
-                            updates.push((other, link.this));
+                        if let Some(other) = free_links.insert(
+                            link.name.clone(),
+                            LinkInfo {
+                                this: link.opposite,
+                                this_type: link.opposite_type,
+                                opposite: link.this,
+                            },
+                        ) {
+                            updates.push((other.opposite, link.this));
                             connected.insert(link.name.clone());
                         }
                     }
                 }
             }
+        }
+
+        // remove free links from connected
+
+        for name in connected {
+            free_links.remove(&name);
         }
 
         for (from, to) in updates {
@@ -452,17 +499,10 @@ impl Rule {
             }
         }
 
-        free_links.extend(links.into_iter().map(|(name, this)| RuleLink {
-            name,
-            this,
-            opposite: RuleLinkArg::None,
-            opposite_type: None,
-        }));
-
         result
     }
 
-    fn solve_guard(&mut self, free_links: &[RuleLink]) {
+    fn solve_guard(&mut self, free_links: &mut HashMap<String, LinkInfo>) {
         let mut guard = self.guard.clone();
 
         for constraint in guard.constraints.iter_mut() {
@@ -470,13 +510,12 @@ impl Rule {
                 GuardNode::Constraint(func, vars) => {
                     'var: for var in vars.iter_mut() {
                         if let GuardSource::Placeholder(name) = var {
-                            for link in free_links {
-                                if link.name == *name {
-                                    if let Some((id, idx)) = link.this.id_index() {
-                                        let atom = self.atoms.get_mut(&id).unwrap();
-                                        atom.args[idx].opposite_type = Some(*func);
-                                        continue 'var;
-                                    }
+                            if let Some(link) = free_links.get_mut(name) {
+                                if let Some((id, idx)) = link.opposite.id_index() {
+                                    let atom = self.atoms.get_mut(&id).unwrap();
+                                    atom.args[idx].opposite_type = Some(*func);
+                                    link.this_type = Some(*func);
+                                    continue 'var;
                                 }
                             }
                         }
@@ -491,19 +530,17 @@ impl Rule {
             }
         }
 
-        'def: for def in guard.definitions.iter_mut() {
+        for def in guard.definitions.iter_mut() {
             // do special handling for definitions with only one item
             let var = def.1;
             match &mut var.node {
                 GuardNode::Var(var) => {
                     if let GuardSource::Placeholder(name) = var {
-                        for link in free_links {
-                            if link.name == *name {
-                                if let Some((id, idx)) = link.this.id_index() {
-                                    *var = GuardSource::AtPortOfAtom(id, idx);
-                                }
-                                continue 'def; // continue to next definition, otherwise it is unconstrained
+                        if let Some(link) = free_links.get_mut(name) {
+                            if let Some((id, idx)) = link.opposite.id_index() {
+                                *var = GuardSource::AtPortOfAtom(id, idx);
                             }
+                            continue; // continue to next definition, otherwise it is unconstrained
                         }
                         panic!("Unconstrained link in guard");
                     }
@@ -540,7 +577,7 @@ impl Rule {
         &mut self,
         node: &mut GuardNode,
         type_: &ProcessConstraint,
-        free_links: &[RuleLink],
+        free_links: &mut HashMap<String, LinkInfo>,
     ) -> ProcessConstraint {
         match node {
             GuardNode::Var(var) => {
@@ -556,6 +593,11 @@ impl Rule {
                         } else {
                             let atom = self.atoms.get_mut(atom_id).unwrap();
                             atom.args[*idx].opposite_type = Some(*type_);
+                            for link in free_links.values_mut() {
+                                if link.opposite == atom.args[*idx].this {
+                                    link.this_type = Some(*type_);
+                                }
+                            }
                         }
                     }
                     GuardSource::Variable(def) => {
@@ -573,13 +615,12 @@ impl Rule {
                         }
                     }
                     GuardSource::Placeholder(name) => {
-                        for link in free_links {
-                            if link.name == *name {
-                                if let Some((id, idx)) = link.this.id_index() {
-                                    let atom = self.atoms.get_mut(&id).unwrap();
-                                    atom.args[idx].opposite_type = Some(*type_);
-                                    substitute = Some(GuardSource::AtPortOfAtom(id, idx));
-                                }
+                        if let Some(link) = free_links.get_mut(name) {
+                            if let Some((id, idx)) = link.opposite.id_index() {
+                                let atom = self.atoms.get_mut(&id).unwrap();
+                                atom.args[idx].opposite_type = Some(*type_);
+                                link.this_type = Some(*type_);
+                                substitute = Some(GuardSource::AtPortOfAtom(id, idx));
                             }
                         }
                         for hl in self.hyperlinks.values() {

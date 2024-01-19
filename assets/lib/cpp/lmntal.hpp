@@ -121,6 +121,27 @@ private:
   atom_type type{atom_type::Plain};
   void *data{};
   std::vector<Atom *> bonds{};
+
+  void clone_to(NormalAtom *atom) const {
+    atom->flag = flag;
+    atom->bonds = bonds;
+    switch (type) {
+    case Int:
+      atom->set_int(get_int());
+      break;
+    case Float:
+      atom->set_float(get_float());
+      break;
+    case String:
+      atom->set_string(get_string());
+      break;
+    case Char:
+      atom->set_char(get_char());
+      break;
+    default:
+      break;
+    }
+  }
 };
 
 class Hyperlink final : public Atom {
@@ -172,6 +193,12 @@ public:
     }
 
     atoms_by_arity_[bond_count].push_back(a);
+    return a;
+  }
+
+  auto clone_atom(NormalAtom const *atom, size_t const pos) -> NormalAtom * {
+    auto *a = create_atom(atom->label, atom->get_arity());
+    (dynamic_cast<NormalAtom*>(atom->at(pos)))->clone_to(a);
     return a;
   }
 
@@ -250,6 +277,10 @@ AtomStore global_atoms{};
 auto create_atom(const std::string_view name, const size_t bond_count)
     -> NormalAtom * {
   return global_atoms.create_atom(name, bond_count);
+}
+
+auto clone_atom(const NormalAtom *atom, const size_t pos) -> NormalAtom * {
+  return global_atoms.clone_atom(atom, pos);
 }
 
 auto create_hyperlink(const std::string_view name) -> Hyperlink * {

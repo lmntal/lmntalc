@@ -367,6 +367,32 @@ fn generate_case(
             match (arg.this, arg.opposite) {
                 (RuleLinkArg::Head(_, _), RuleLinkArg::Head(_, _))
                 | (RuleLinkArg::Body(_, _), RuleLinkArg::Body(_, _)) => {}
+                (RuleLinkArg::Body(body_id, body_port), RuleLinkArg::Head(head_id, head_port)) => {
+                    if rule
+                        .all_atoms()
+                        .get(&head_id)
+                        .unwrap()
+                        .args()
+                        .nth(head_port)
+                        .unwrap()
+                        .opposite_type
+                        .is_none()
+                    {
+                        continue;
+                    }
+                    // case that clone is needed
+                    body.push(LMNtalIR::CloneAtom {
+                        id: *slot,
+                        from_id: symbol_table[&head_id],
+                        from_port: head_port,
+                    });
+                    // do not update symbol table, since the atom won't be used again
+                    *slot += 1;
+                    link_queue.push(LMNtalIR::Link {
+                        src: VarSource::Body(symbol_table[&body_id], body_port),
+                        dst: VarSource::Body(*slot - 1, 0),
+                    });
+                }
                 _ => {
                     let link = arg.clone();
                     if let Some(ir) = create_link(&link, symbol_table) {
@@ -377,8 +403,19 @@ fn generate_case(
         }
     }
 
+    let mut map = HashSet::new();
+
     for ir in link_queue {
-        body.push(ir);
+        if let LMNtalIR::Link { src, dst } = ir {
+            if map.contains(&(src, dst)) {
+                continue;
+            } else {
+                map.insert((dst, src));
+                body.push(ir);
+            }
+        } else {
+            body.push(ir);
+        }
     }
 
     for ir in remove_queue {
@@ -409,9 +446,8 @@ fn create_link(link: &RuleLink, symbol_table: &HashMap<AtomId, usize>) -> Option
                 dst: VarSource::Body(symbol_table[&dst], dst_port),
             })
         }
-        (RuleLinkArg::Body(_, _), RuleLinkArg::Head(_, _)) => None, // ignore since it is already handled in the reverse direction
+        (RuleLinkArg::Body(_, _), RuleLinkArg::Head(_, _)) => None, // ignore since it is already handled outside
         (RuleLinkArg::Body(_, _), RuleLinkArg::None) => {
-            dbg!(link);
             panic!("link {} is not constrained", link.name);
         }
         (RuleLinkArg::Head(p1, idx1), RuleLinkArg::Head(p2, idx2)) => Some(LMNtalIR::Link {

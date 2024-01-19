@@ -92,21 +92,37 @@ impl PythonBackend {
             LMNtalIR::Relink { src, src_port, dst } => {
                 code.push_str(&format!("relink(atom_{}, {}, {})", src, src_port, fmt(dst)));
             }
-            LMNtalIR::CheckType { id, port, ty } => {
-                code.push_str(&format!(
-                    "atom_{}.at({}).is_{}()",
-                    id,
-                    port,
-                    atom_type_to_string(ty),
-                ));
-            }
+            LMNtalIR::CheckType { id, port, ty } => match ty {
+                ProcessConstraint::Hyperlink => unreachable!(),
+                ProcessConstraint::Unique => unimplemented!(),
+                ProcessConstraint::Ground => unimplemented!(),
+                ProcessConstraint::Unary => {
+                    code.push_str(&format!("atom_{}.at({}).arity() == 1", id, port,));
+                }
+                _ => {
+                    code.push_str(&format!(
+                        "atom_{}.at({}).is_{}()",
+                        id,
+                        port,
+                        atom_type_to_string(ty),
+                    ));
+                }
+            },
+
             LMNtalIR::CheckValue(op) => code.push_str(&print_operation(op)),
             LMNtalIR::DefineTempVar { id, ty, op, .. } => {
                 code.push_str(&format!("var_{} = {}", id, print_operation(op)));
                 self.var_type.insert(*id, *ty);
             }
-            LMNtalIR::CloneAtom { id, from } => {
-                code.push_str(&format!("atom_{} = clone_atom(atom_{})", id, from));
+            LMNtalIR::CloneAtom {
+                id,
+                from_id,
+                from_port,
+            } => {
+                code.push_str(&format!(
+                    "atom_{} = clone_atom(atom_{}, {})",
+                    id, from_id, from_port
+                ));
             }
             LMNtalIR::FindAtom { id, name, arity } => {
                 code.push_str(&format!("atom_{} = find_atom(\"{}\", {})", id, name, arity));

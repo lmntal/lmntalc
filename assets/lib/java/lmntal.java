@@ -201,6 +201,12 @@ final class NormalAtom extends Atom {
         args[index] = null;
     }
 
+    public void cloneFrom(NormalAtom atom) {
+        this.data = atom.data;
+        this.type = atom.type;
+        System.arraycopy(atom.args, 0, this.args, 0, args.length);
+    }
+
     @Override
     public String toString() {
         return switch (type) {
@@ -239,6 +245,12 @@ class AtomStore {
         }
         atoms.get(arity).add(atom);
         return atom;
+    }
+
+    public NormalAtom cloneAtom(NormalAtom atom, int port) {
+        var newAtom = createAtom(atom.at(port).getName(), atom.at(port).getArity());
+        newAtom.cloneFrom((NormalAtom) atom.at(port));
+        return newAtom;
     }
 
     public Hyperlink createHyperlink(String name) {

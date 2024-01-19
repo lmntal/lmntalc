@@ -10,6 +10,10 @@
         return AtomStore.INSTANCE.createAtom(name, arity);
     }
 
+    static NormalAtom cloneAtom(NormalAtom atom, int port) {
+        return AtomStore.INSTANCE.cloneAtom(atom, port);
+    }
+
     static void link(Atom atom1, int index1, Atom atom2, int index2) {
         atom1.set(index1, atom2);
         atom2.set(index2, atom1);

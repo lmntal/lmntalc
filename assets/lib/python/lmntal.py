@@ -1,5 +1,6 @@
 from __future__ import annotations
 import random
+import copy
 from typing import (
     Any,
     Generator,
@@ -29,6 +30,9 @@ class NormalAtom(Atom):
         if isinstance(self.data, int) or isinstance(self.data, float):
             return f"{self.data}"
         return f"{self.name}"
+
+    def arity(self) -> int:
+        return self.arity
 
     def at(self, index: int) -> Atom:
         return self.args[index]
@@ -95,6 +99,13 @@ class AtomStore:
         self.store[arity].append(atom)
         return atom
 
+    def clone(self, atom: NormalAtom, port: int) -> NormalAtom:
+        atom2 = self.create(atom.args[port].name, atom.args[port].arity)
+        atom2.data = copy.deepcopy(atom.args[port].data)
+        for i in range(atom2.arity):
+            atom2.args[i] = atom.args[i]
+        return atom2
+
     def create_hyperlink(self, name: str) -> Hyperlink:
         hl = Hyperlink(name)
         self.hyperlinks.append(hl)
@@ -150,6 +161,9 @@ def create_atom(name: int, arity: int) -> NormalAtom:
     return atom_list.create(name, arity)
 
 
+def clone_atom(atom: NormalAtom, port: int) -> NormalAtom:
+    return atom_list.clone(atom, port)
+
 def create_hyperlink(name: str) -> Hyperlink:
     return atom_list.create_hyperlink(name)
 
@@ -175,6 +189,13 @@ def relink(atom: NormalAtom, index: int, atom2: NormalAtom, index2: int):
             index3 = i
             break
     link(atom3, index3, atom2, index2)
+
+
+def get_atom_at_port(atom: NormalAtom, index: int, name: str, arity: int) -> NormalAtom:
+    atom2 = atom.at(index)
+    if isinstance(atom2, NormalAtom) and atom2.name == name and atom2.arity == arity:
+        return atom2
+    return None
 
 
 def get_hyperlink_at_port(atom: NormalAtom, index: int) -> Hyperlink:
