@@ -1,0 +1,24 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: lmntalc
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Qirui
+    family-names: Wang
+    email: wang@ueda.info.waseda.ac.jp
+    affiliation: 'Ueda Lab., Waseda University'
+    orcid: 'https://orcid.org/0009-0008-5140-5610'
+repository-code: 'https://github.com/lmntal/lmntalc'
+repository-artifact: 'https://crates.io/crates/lmntalc'
+keywords:
+  - lmntal
+  - compiler
+license: MIT
+commit: b9711a559192263eb03b24c65a32d7c72b633227
+version: 0.9.3
+date-released: '2024-01-18'
