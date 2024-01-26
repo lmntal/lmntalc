@@ -15,12 +15,14 @@ static HEADER: &[u8] = include_bytes!("../../assets/lib/python/lmntal.py");
 
 pub struct PythonBackend {
     var_type: HashMap<usize, ProcessConstraint>,
+    name_map: HashMap<String, usize>,
 }
 
 impl Backend for PythonBackend {
     fn new() -> Self {
         Self {
             var_type: HashMap::new(),
+            name_map: HashMap::new(),
         }
     }
 
@@ -28,7 +30,9 @@ impl Backend for PythonBackend {
         let mut code = String::new();
         code.push_str(std::str::from_utf8(HEADER).unwrap());
         code.push_str(&self.print_rules(&generator.rules));
-        code.push_str(&self.print_main(generator));
+        let main = self.print_main(generator);
+        code.push_str(&self.print_name_map());
+        code.push_str(&main);
         code
     }
 }
@@ -51,10 +55,8 @@ impl PythonBackend {
                 arity,
                 data,
             } => {
-                code.push_str(&format!(
-                    "atom_{} = create_atom(\"{}\", {})",
-                    id, name, arity
-                ));
+                let name = self.get_name(name);
+                code.push_str(&format!("atom_{} = create_atom({}, {})", id, name, arity));
                 if !data.is_empty() {
                     code.push_str(&format!("\n{}", " ".repeat(indent)));
                     match data {
@@ -125,7 +127,8 @@ impl PythonBackend {
                 ));
             }
             LMNtalIR::FindAtom { id, name, arity } => {
-                code.push_str(&format!("atom_{} = find_atom(\"{}\", {})", id, name, arity));
+                let name = self.get_name(name);
+                code.push_str(&format!("atom_{} = find_atom({}, {})", id, name, arity));
             }
             LMNtalIR::GetAtomAtPort {
                 id,
@@ -134,8 +137,9 @@ impl PythonBackend {
                 name,
                 arity,
             } => {
+                let name = self.get_name(name);
                 code.push_str(&format!(
-                    "atom_{} = get_atom_at_port(atom_{}, {}, \"{}\", {})",
+                    "atom_{} = get_atom_at_port(atom_{}, {}, {}, {})",
                     id, from, port, name, arity
                 ));
             }
@@ -149,7 +153,8 @@ impl PythonBackend {
                 code.push_str(&format!("atom_{}.remove_at({})", id, port));
             }
             LMNtalIR::CreateHyperlink { id, name } => {
-                code.push_str(&format!("hl_{} = create_hyperlink(\"{}\")", id, name));
+                let name = self.get_name(name);
+                code.push_str(&format!("hl_{} = create_hyperlink({})", id, name));
             }
             LMNtalIR::LinkToHyperlink { atom, hyperlink } => {
                 code.push_str(&format!("hl_{}.add({})", hyperlink.id(), fmt(atom)));
@@ -184,6 +189,16 @@ impl PythonBackend {
         }
 
         code.push_str("    ]\n");
+
+        if rules == 0 {
+            code.push_str(
+                r#"    dump_atoms()
+
+if __name__ == "__main__":
+    main()"#,
+            );
+            return code;
+        }
 
         let rules_minus_1 = rules - 1;
         code.push_str(&format!(
@@ -234,8 +249,9 @@ if __name__ == "__main__":
         let mut code = String::new();
         match ir {
             LMNtalIR::FindAtom { id, name, arity } => {
+                let name = self.get_name(name);
                 code.push_str(&format!(
-                    "{}for atom_{} in find_atom(\"{}\", {}): \n",
+                    "{}for atom_{} in find_atom({}, {}): \n",
                     " ".repeat(*indent),
                     id,
                     name,
@@ -370,6 +386,26 @@ if __name__ == "__main__":
         } else {
             code.push_str(&format!("{}return True\n", " ".repeat(*indent)));
         }
+
+        code
+    }
+
+    fn get_name(&mut self, name: &str) -> usize {
+        if let Some(id) = self.name_map.get(name) {
+            *id
+        } else {
+            let id = self.name_map.len();
+            self.name_map.insert(name.to_string(), id);
+            id
+        }
+    }
+
+    fn print_name_map(&self) -> String {
+        let mut code = "name_map = {\n".to_string();
+        for (name, id) in &self.name_map {
+            code.push_str(&format!("    {}: \"{}\",\n", id, name));
+        }
+        code.push_str("}\n\n");
 
         code
     }

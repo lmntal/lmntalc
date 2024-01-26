@@ -119,6 +119,10 @@ impl Guard {
     pub(crate) fn defined(&self, name: &str) -> Option<VariableId> {
         self.defined.get(name).copied()
     }
+
+    pub(crate) fn get(&self, id: VariableId) -> Option<&Variable> {
+        self.definitions.get(&id)
+    }
 }
 
 impl Display for ProcessConstraint {

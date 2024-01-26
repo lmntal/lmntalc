@@ -110,7 +110,7 @@ fn visit_rule(node: &ASTNode, mem_id: MembraneId) -> Rule {
     {
         // keep only letters and underlscore in the name
         let mut name = name.clone();
-        name.retain(|c| c.is_alphabetic());
+        name.retain(|c| c.is_alphanumeric() || c == '_');
         let mut rule = Rule::new(name, mem_id);
         let head_id = rule.next_membrane_id();
         let head_procs = visit_process_list(head, &mut rule, head_id);

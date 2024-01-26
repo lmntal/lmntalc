@@ -1,12 +1,12 @@
     static Hyperlink getHyperlinkAtPort(Atom atom, int port) {
-        var hl = atom.at(port);
+        var hl = atom.at(port).atom;
         if (hl instanceof Hyperlink) {
             return (Hyperlink) hl;
         }
         return null;
     }
 
-    static Atom createAtom(String name, int arity) {
+    static Atom createAtom(int name, int arity) {
         return AtomStore.INSTANCE.createAtom(name, arity);
     }
 
@@ -14,22 +14,20 @@
         return AtomStore.INSTANCE.cloneAtom(atom, port);
     }
 
-    static void link(Atom atom1, int index1, Atom atom2, int index2) {
-        atom1.set(index1, atom2);
-        atom2.set(index2, atom1);
+    static void link(NormalAtom atom1, int index1, NormalAtom atom2, int index2) {
+        atom1.set(index1, atom2, index2);
+        atom2.set(index2, atom1, index1);
     }
 
-    static void relink(Atom atom1, int index1, Atom atom2, int index2) {
-        var atom3 = atom1.at(index1);
-        // find the port of the atom1 which is linked to the atom3
-        var index3 = 0;
-        for (int i = 0; i < atom3.getArity(); i++) {
-            if (atom3.at(i) == atom1) {
-                index3 = i;
-                break;
-            }
-        }
-        link(atom3, index3, atom2, index2);
+    static void relink(NormalAtom atom1, int index1, NormalAtom atom2, int index2) {
+        var link = atom1.at(index1);
+        link((NormalAtom) link.atom, link.pos, atom2, index2);
+    }
+
+    static void unify(NormalAtom atom1, int index1, NormalAtom atom2, int index2) {
+        var link1 = atom1.at(index1);
+        var link2 = atom2.at(index2);
+        link((NormalAtom) link1.atom, link1.pos, (NormalAtom) link2.atom, link2.pos);
     }
 
     static boolean equals(Atom... atoms) {
@@ -41,15 +39,10 @@
         return true;
     }
 
-    static Iterable<NormalAtom> findAtom(String name, int arity) {
+    static Stream<NormalAtom> findAtom(int name, int arity) {
         return AtomStore.INSTANCE.findAtom(name, arity);
     }
 
     static void dumpAtoms() {
         System.out.println(AtomStore.INSTANCE.dumpAtoms());
     }
-
-    interface Rule {
-        boolean apply();
-    }
-

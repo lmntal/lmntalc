@@ -25,7 +25,7 @@ pub struct Case {
 #[derive(Debug)]
 pub struct RuleGenerator<'rule> {
     rule: &'rule Rule,
-    remove_queue: Vec<LMNtalIR>,
+    remove_queue: VecDeque<LMNtalIR>,
     slot: usize,
     symbol_table: HashMap<AtomId, usize>,
 }
@@ -48,7 +48,7 @@ impl<'rule> RuleGenerator<'rule> {
     pub(crate) fn new(rule: &'rule Rule) -> Self {
         Self {
             rule,
-            remove_queue: Vec::new(),
+            remove_queue: VecDeque::new(),
             slot: 0,
             symbol_table: HashMap::new(),
         }
@@ -80,7 +80,7 @@ fn generate_pattern(
     rule: &Rule,
     slot: &mut usize,
     symbol_table: &mut HashMap<AtomId, usize>,
-    remove_queue: &mut Vec<LMNtalIR>,
+    remove_queue: &mut VecDeque<LMNtalIR>,
 ) -> Vec<LMNtalIR> {
     let mut inst = vec![];
     // find nodes with 0 incoming edges and nodes with multiple incoming edges
@@ -140,7 +140,7 @@ fn generate_pattern(
         } else {
             atoms_to_be_different.insert(atom.name().to_string(), vec![*slot]);
         }
-        remove_queue.push(LMNtalIR::RemoveAtom { id: *slot });
+        remove_queue.push_back(LMNtalIR::RemoveAtom { id: *slot });
         symbol_table.insert(atom_id, *slot);
         *slot += 1;
         for (idx, arg) in atom.args().enumerate() {
@@ -154,7 +154,7 @@ fn generate_pattern(
                     hyperlinks_to_be_different.insert(arg_id, *slot);
                     symbol_table.insert(arg_id, *slot);
                     *slot += 1;
-                    remove_queue.push(LMNtalIR::RemoveFromHyperlink {
+                    remove_queue.push_back(LMNtalIR::RemoveFromHyperlink {
                         atom: VarSource::Head(symbol_table[&atom_id], idx),
                         hyperlink: VarSource::Head(symbol_table[&arg_id], 0),
                     });
@@ -178,7 +178,7 @@ fn generate_pattern(
                     name: atom.name().to_string(),
                     arity: atom.args().count(),
                 });
-                remove_queue.push(LMNtalIR::RemoveAtom { id: *slot });
+                remove_queue.push_back(LMNtalIR::RemoveAtom { id: *slot });
                 symbol_table.insert(id, *slot);
                 *slot += 1;
                 for (idx, arg) in atom.args().enumerate() {
@@ -217,7 +217,7 @@ fn generate_case(
     rule: &Rule,
     slot: &mut usize,
     symbol_table: &mut HashMap<AtomId, usize>,
-    mut remove_queue: Vec<LMNtalIR>,
+    mut remove_queue: VecDeque<LMNtalIR>,
 ) -> Case {
     let mut condition = vec![];
     let mut definition = vec![];
@@ -237,7 +237,7 @@ fn generate_case(
                             });
                         }
                     }
-                    remove_queue.push(LMNtalIR::RemoveAtomAt {
+                    remove_queue.push_front(LMNtalIR::RemoveAtomAt {
                         id: symbol_table[&atom_id],
                         port: arg.this.index().unwrap(),
                     })
@@ -291,22 +291,39 @@ fn generate_case(
     }
 
     let mut link_queue = vec![];
-    let mut skip_fuse = HashSet::new();
+    let mut skip = HashSet::new();
 
     for (atom_id, atom) in rule.body_atoms() {
-        if atom.name() == "><" && atom.args().count() == 2 {
-            let mut args = atom.args();
-            let arg1 = args.next().unwrap();
-            let arg2 = args.next().unwrap();
-            if let RuleLinkArg::Head(op1, _) = arg1.opposite {
-                if let RuleLinkArg::Head(op2, _) = arg2.opposite {
-                    // fuse hyperlinks after all links are created, in case the atoms linked to the hyperlinks that are being fused
-                    remove_queue.push(LMNtalIR::FuseHyperlink {
-                        into: VarSource::Head(symbol_table[&op1], 0),
-                        from: VarSource::Head(symbol_table[&op2], 0),
-                    });
-                    skip_fuse.insert(atom_id);
-                    continue;
+        if atom.args().count() == 2 {
+            if atom.name() == "><" {
+                let mut args = atom.args();
+                let arg1 = args.next().unwrap();
+                let arg2 = args.next().unwrap();
+                if let RuleLinkArg::Head(op1, _) = arg1.opposite {
+                    if let RuleLinkArg::Head(op2, _) = arg2.opposite {
+                        // fuse hyperlinks after all links are created, in case the atoms linked to the hyperlinks that are being fused
+                        remove_queue.push_back(LMNtalIR::FuseHyperlink {
+                            into: VarSource::Head(symbol_table[&op1], 0),
+                            from: VarSource::Head(symbol_table[&op2], 0),
+                        });
+                        skip.insert(atom_id);
+                        continue;
+                    }
+                }
+            } else if atom.name() == "=" {
+                let mut args = atom.args();
+                let arg1 = args.next().unwrap();
+                let arg2 = args.next().unwrap();
+                if let RuleLinkArg::Head(atom1, port1) = arg1.opposite {
+                    if let RuleLinkArg::Head(atom2, port2) = arg2.opposite {
+                        // fuse hyperlinks after all links are created, in case the atoms linked to the hyperlinks that are being fused
+                        remove_queue.push_front(LMNtalIR::Unify {
+                            into: VarSource::Head(symbol_table[&atom1], port1),
+                            from: VarSource::Head(symbol_table[&atom2], port2),
+                        });
+                        skip.insert(atom_id);
+                        continue;
+                    }
                 }
             }
         }
@@ -334,7 +351,7 @@ fn generate_case(
     }
 
     for (this_id, atom) in rule.body_atoms() {
-        if skip_fuse.contains(&this_id) {
+        if skip.contains(&this_id) {
             continue;
         }
         for (this_port, arg) in atom.args().enumerate() {
@@ -394,8 +411,12 @@ fn generate_case(
                     });
                 }
                 _ => {
-                    let link = arg.clone();
-                    if let Some(ir) = create_link(&link, symbol_table) {
+                    if let Some(id) = arg.opposite.atom_id() {
+                        if skip.contains(&id) {
+                            continue;
+                        }
+                    }
+                    if let Some(ir) = create_link(arg, symbol_table) {
                         link_queue.push(ir)
                     }
                 }

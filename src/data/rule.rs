@@ -383,7 +383,7 @@ impl Rule {
 
         let body = self.body;
         res.combine(self.solve_membrane(&body, &mut free, true));
-        
+
         self.unification(self.body);
 
         if !free.is_empty() {
@@ -423,9 +423,20 @@ impl Rule {
                     if let Some(var_id) = self.guard.defined(&link.name) {
                         // create new atom for every variable
                         let id = self.id_generator.next_atom_id(self.parent);
+                        let var = self.guard.get(var_id).unwrap();
+                        let name = if let Some(ty) = var.ty {
+                            match ty {
+                                ProcessConstraint::Int => "_int",
+                                ProcessConstraint::Float => "_float",
+                                ProcessConstraint::String => todo!(),
+                                _ => unreachable!(),
+                            }
+                        } else {
+                            &link.name
+                        };
                         let atom = RuleAtom {
                             parent: self.parent,
-                            name: link.name.to_owned(),
+                            name: name.to_string(),
                             data: Data::Variable(var_id),
                             type_: None,
                             args: vec![],
@@ -670,6 +681,7 @@ impl Rule {
         }
 
         let mut connectors = vec![];
+        let mut remove = vec![];
 
         for atom_id in &membrane.atoms {
             let atom = self.atoms.get(atom_id).unwrap();
@@ -686,6 +698,13 @@ impl Rule {
             let right_type = atom.args[1].opposite_type;
             let left_name = atom.args[0].name.clone();
             let right_name = atom.args[1].name.clone();
+
+            if atom.parent == self.body {
+                // in body but both sides are in head
+                if left.is_head() && right.is_head() {
+                    continue;
+                }
+            }
 
             match (left.id_index(), right.id_index()) {
                 (Some((id, idx)), None) => {
@@ -719,11 +738,13 @@ impl Rule {
                 }
                 (None, None) => {}
             }
+
+            remove.push(*connector);
         }
 
         let membrane = self.membranes.get_mut(&mem_id).unwrap();
 
-        for connector in &connectors {
+        for connector in remove {
             self.atoms.remove(connector);
             membrane.atoms.remove(connector);
         }

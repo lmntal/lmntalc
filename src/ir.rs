@@ -21,9 +21,14 @@ pub enum LMNtalIR {
     ///
     /// Since it will be only used for in rule,
     /// the `id` will be the order of the pattern atom in the rule
-    RemoveAtom { id: usize },
+    RemoveAtom {
+        id: usize,
+    },
     /// Remove an atom at specified `port` of atom with specified `id`
-    RemoveAtomAt { id: usize, port: usize },
+    RemoveAtomAt {
+        id: usize,
+        port: usize,
+    },
     /// Clone an atom from specified `from` atom with specified `id`
     CloneAtom {
         id: usize,
@@ -32,7 +37,10 @@ pub enum LMNtalIR {
     },
 
     /// Link atoms with specified ports
-    Link { src: VarSource, dst: VarSource },
+    Link {
+        src: VarSource,
+        dst: VarSource,
+    },
     /// Link the atom `dst`'s port `dst_port` to the **atom linked to** `src`'s port `src_port`
     Relink {
         src: usize,
@@ -43,7 +51,10 @@ pub enum LMNtalIR {
     /// Create a new hyperlink with specified name
     ///
     /// There is no explicit arity for hyperlink, since it is not fixed
-    CreateHyperlink { id: usize, name: String },
+    CreateHyperlink {
+        id: usize,
+        name: String,
+    },
     /// Add an atom to a hyperlink
     LinkToHyperlink {
         atom: VarSource,
@@ -57,7 +68,10 @@ pub enum LMNtalIR {
     /// Fuse hyperlink `from` into hyperlink `into`, and remove `from`
     ///
     /// i.e. `into` will be the new hyperlink with union of atoms in `into` and `from`
-    FuseHyperlink { into: VarSource, from: VarSource },
+    FuseHyperlink {
+        into: VarSource,
+        from: VarSource,
+    },
 
     /// Find atoms with specified name and arity
     ///
@@ -76,7 +90,11 @@ pub enum LMNtalIR {
         arity: usize,
     },
     /// Get the hyperlink at specified `port` of atom with specified `id`
-    GetHyperlinkAtPort { id: usize, from: usize, port: usize },
+    GetHyperlinkAtPort {
+        id: usize,
+        from: usize,
+        port: usize,
+    },
     /// Check if atoms (or hyperlinks) at id's port are equal
     AtomEqualityIdPort {
         /// List of atoms and their ports
@@ -107,6 +125,10 @@ pub enum LMNtalIR {
         name: String,
         ty: ProcessConstraint,
         op: Operation,
+    },
+    Unify {
+        into: VarSource,
+        from: VarSource,
     },
 }
 
@@ -235,6 +257,9 @@ impl Display for LMNtalIR {
             }
             LMNtalIR::FuseHyperlink { into, from } => {
                 write!(f, "fuse hyperlink {} into hyperlink {}", from, into)
+            }
+            LMNtalIR::Unify { into, from } => {
+                write!(f, "unify {} with {}", from, into)
             }
         }
     }

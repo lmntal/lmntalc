@@ -16,12 +16,14 @@ static MAIN: &[u8] = include_bytes!("../../assets/lib/java/main.java");
 
 pub struct JavaBackend {
     var_type: HashMap<usize, ProcessConstraint>,
+    name_map: HashMap<String, usize>,
 }
 
 impl Backend for JavaBackend {
     fn new() -> Self {
         Self {
             var_type: HashMap::new(),
+            name_map: HashMap::new(),
         }
     }
 
@@ -55,8 +57,9 @@ impl JavaBackend {
                 arity,
                 data,
             } => {
+                let name = self.get_name(name);
                 code.push_str(&format!(
-                    "var atom_{} = AtomStore.INSTANCE.createAtom(\"{}\", {});",
+                    "var atom_{} = AtomStore.INSTANCE.createAtom({}, {});",
                     id, name, arity
                 ));
                 if !data.is_empty() {
@@ -132,12 +135,6 @@ impl JavaBackend {
                     id, from_id, from_port
                 ));
             }
-            LMNtalIR::FindAtom { id, name, arity } => {
-                code.push_str(&format!(
-                    "var atom_{} = findAtom(\"{}\", {});",
-                    id, name, arity
-                ));
-            }
             LMNtalIR::GetAtomAtPort {
                 id,
                 from,
@@ -145,8 +142,9 @@ impl JavaBackend {
                 name,
                 arity,
             } => {
+                let name = self.get_name(name);
                 code.push_str(&format!(
-                    "var atom_{} = atom_{}.getAtomAtPort({}, \"{}\", {});",
+                    "var atom_{} = atom_{}.getAtomAtPort({}, {}, {});",
                     id, from, port, name, arity
                 ));
             }
@@ -160,8 +158,9 @@ impl JavaBackend {
                 code.push_str(&format!("atom_{}.removeAt({});", id, port));
             }
             LMNtalIR::CreateHyperlink { id, name } => {
+                let name = self.get_name(name);
                 code.push_str(&format!(
-                    "var hl_{} = AtomStore.INSTANCE.createHyperlink(\"{}\");",
+                    "var hl_{} = AtomStore.INSTANCE.createHyperlink({});",
                     id, name
                 ));
             }
@@ -174,13 +173,25 @@ impl JavaBackend {
             LMNtalIR::FuseHyperlink { into, from } => {
                 code.push_str(&format!("hl_{}.fuse(hl_{});", into.id(), from.id()));
             }
-            _ => unreachable!(),
+            LMNtalIR::Unify { into, from } => {
+                code.push_str(&format!("unify({}, {});", fmt(into), fmt(from)));
+            }
+            _ => unreachable!("unimplemented: {:?}", ir),
         }
         code
     }
 
     fn print_main(&mut self, generator: &Generator) -> String {
         let mut code = String::new();
+        code.push_str(
+            "    public static String getName(int name) {\n        return switch (name) {\n",
+        );
+        for (name, id) in &self.name_map {
+            code.push_str(&format!("            case {} -> \"{}\";\n", id, name));
+        }
+        code.push_str("            default -> \"\";\n        };\n    }\n\n");
+
+        // main function
         code.push_str("    public static void main(String[] args) {\n");
         for node in &generator.init {
             code.push_str(&self.pretty_print(node, 8));
@@ -255,12 +266,18 @@ impl JavaBackend {
         let mut code = String::new();
         match ir {
             LMNtalIR::FindAtom { id, name, arity } => {
+                let name = self.get_name(name);
+                let it = format!("it_{}", id);
                 code.push_str(&format!(
-                    "{}for (var atom_{} : findAtom(\"{}\", {})) {{\n",
+                    "{}for (var {} = findAtom({}, {}).iterator(); {}.hasNext(); ) {{\n{}var atom_{} = {}.next();\n",
                     " ".repeat(*indent),
-                    id,
+                    it,
                     name,
-                    arity
+                    arity,
+                    it,
+                    " ".repeat(*indent+4),
+                    id,
+                    it,
                 ));
                 *indent += 4;
             }
@@ -383,6 +400,16 @@ impl JavaBackend {
 
         code
     }
+
+    fn get_name(&mut self, name: &str) -> usize {
+        if let Some(id) = self.name_map.get(name) {
+            *id
+        } else {
+            let id = self.name_map.len();
+            self.name_map.insert(name.to_string(), id);
+            id
+        }
+    }
 }
 
 fn print_operation(op: &Operation) -> String {
@@ -391,7 +418,7 @@ fn print_operation(op: &Operation) -> String {
             Literal::Int(i) => i.to_string(),
             Literal::Float(f) => f.to_string(),
             Literal::Char(c) => c.to_string(),
-            Literal::String(s) => format!("std::string(\"{}\")", s),
+            Literal::String(s) => format!("\"{}\"", s),
         },
         Operation::Variable { source, ty_ } => match source {
             crate::ir::VarSource::Head(id, port) | crate::ir::VarSource::Body(id, port) => {

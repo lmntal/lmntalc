@@ -15,19 +15,24 @@ static LMNTAL: &[u8] = include_bytes!("../../assets/lib/cpp/lmntal.hpp");
 
 pub struct CppBackend {
     var_type: HashMap<usize, ProcessConstraint>,
+    name_map: HashMap<String, usize>,
 }
 
 impl Backend for CppBackend {
     fn new() -> Self {
         Self {
             var_type: HashMap::new(),
+            name_map: HashMap::new(),
         }
     }
     fn pretty_print(&mut self, generator: &Generator) -> String {
         let mut code = String::new();
         code.push_str(std::str::from_utf8(LMNTAL).unwrap());
-        code.push_str(&self.print_rules(&generator.rules));
-        code.push_str(&self.print_main(generator));
+        let rules = self.print_rules(&generator.rules);
+        let main = self.print_main(generator);
+        code.push_str(&self.print_name_map());
+        code.push_str(&rules);
+        code.push_str(&main);
         code
     }
 }
@@ -50,8 +55,9 @@ impl CppBackend {
                 arity,
                 data,
             } => {
+                let name = self.get_name(name);
                 code.push_str(&format!(
-                    "auto atom_{} = create_atom(\"{}\", {});",
+                    "auto atom_{} = create_atom({}, {});",
                     id, name, arity
                 ));
                 if !data.is_empty() {
@@ -63,12 +69,6 @@ impl CppBackend {
                         Data::Float(f) => {
                             code.push_str(&format!("atom_{}->set_float({});", id, f));
                         }
-                        Data::Char(c) => {
-                            code.push_str(&format!("atom_{}->set_char({});", id, c));
-                        }
-                        Data::String(s) => {
-                            code.push_str(&format!("atom_{}->set_string(\"{}\");", id, s));
-                        }
                         Data::Variable(var_id) => {
                             let ty = self.var_type.get(&(*var_id).into()).unwrap();
                             code.push_str(&format!(
@@ -78,7 +78,9 @@ impl CppBackend {
                                 var_id
                             ));
                         }
-                        _ => {}
+                        _ => {
+                            code.push_str("#error not implemented yet");
+                        }
                     }
                 }
             }
@@ -105,7 +107,7 @@ impl CppBackend {
                 }
                 _ => {
                     code.push_str(&format!(
-                        "atom_{}->at({})->is_{}()",
+                        "atom_{}->at({}).is_{}()",
                         id,
                         port,
                         atom_type_to_string(ty),
@@ -127,12 +129,6 @@ impl CppBackend {
                     id, from_id, from_port
                 ));
             }
-            LMNtalIR::FindAtom { id, name, arity } => {
-                code.push_str(&format!(
-                    "auto atom_{} = find_atom(\"{}\", {});",
-                    id, name, arity
-                ));
-            }
             LMNtalIR::GetAtomAtPort {
                 id,
                 from,
@@ -140,8 +136,9 @@ impl CppBackend {
                 name,
                 arity,
             } => {
+                let name = self.get_name(name);
                 code.push_str(&format!(
-                    "auto atom_{} = get_atom_at_port(atom_{}, {}, \"{}\", {});",
+                    "auto atom_{} = get_atom_at_port(atom_{}, {}, {}, {});",
                     id, from, port, name, arity
                 ));
             }
@@ -155,7 +152,8 @@ impl CppBackend {
                 code.push_str(&format!("atom_{}->remove_at({});", id, port));
             }
             LMNtalIR::CreateHyperlink { id, name } => {
-                code.push_str(&format!("auto hl_{} = create_hyperlink(\"{}\");", id, name));
+                let name = self.get_name(name);
+                code.push_str(&format!("auto hl_{} = create_hyperlink({});", id, name));
             }
             LMNtalIR::LinkToHyperlink { atom, hyperlink } => {
                 code.push_str(&format!("hl_{}->add({});", hyperlink.id(), fmt(atom)));
@@ -171,7 +169,10 @@ impl CppBackend {
                     from.id()
                 ));
             }
-            _ => unreachable!(),
+            LMNtalIR::Unify { into, from } => {
+                code.push_str(&format!("unify({}, {});", fmt(into), fmt(from)));
+            }
+            _ => unimplemented!(),
         }
         code
     }
@@ -252,8 +253,9 @@ impl CppBackend {
         let mut code = String::new();
         match ir {
             LMNtalIR::FindAtom { id, name, arity } => {
+                let name = self.get_name(name);
                 code.push_str(&format!(
-                    "{}for (auto atom_{} : find_atom(\"{}\", {})) {{\n",
+                    "{}for (auto atom_{} : find_atom({}, {})) {{\n",
                     " ".repeat(*indent),
                     id,
                     name,
@@ -381,6 +383,28 @@ impl CppBackend {
 
         code
     }
+
+    fn print_name_map(&self) -> String {
+        let mut code =
+            String::from("constexpr std::string_view int2str(name_t const n) {\n  switch (n) {\n");
+
+        for (name, id) in &self.name_map {
+            code.push_str(&format!("    case {}: return \"{}\";\n", id, name));
+        }
+        code.push_str("    default: return \"unknown\";\n  }\n}\n\n");
+
+        code
+    }
+
+    fn get_name(&mut self, name: &str) -> usize {
+        if let Some(id) = self.name_map.get(name) {
+            *id
+        } else {
+            let id = self.name_map.len();
+            self.name_map.insert(name.to_string(), id);
+            id
+        }
+    }
 }
 
 fn print_operation(op: &Operation) -> String {
@@ -397,7 +421,7 @@ fn print_operation(op: &Operation) -> String {
                     format!("get_hlink_at_port(atom_{}, {})", id, port)
                 } else {
                     format!(
-                        "atom_{}->at({})->get_{}()",
+                        "atom_{}->at({}).get_{}()",
                         id,
                         port,
                         atom_type_to_string(ty_)

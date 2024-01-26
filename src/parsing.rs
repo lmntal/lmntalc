@@ -275,12 +275,13 @@ impl<'lex> Parser<'lex> {
         }
         let start = self.pos.get();
         let low = self.peek().span.low();
-        let head = self.parse_process_list()?;
+        let mut head = self.parse_process_list()?;
 
         let mut propagation = None;
 
         if self.skip(&TokenKind::Backslash) {
-            propagation = Some(Box::new(self.parse_process_list()?));
+            propagation = Some(Box::new(head));
+            head = self.parse_process_list()?;
         }
 
         if !self.skip(&TokenKind::ColonDash) {
