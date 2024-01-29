@@ -109,7 +109,7 @@ fn visit_rule(node: &ASTNode, mem_id: MembraneId) -> Rule {
     } = node
     {
         // keep only letters and underlscore in the name
-        let mut name = name.clone();
+        let mut name = name.0.clone();
         name.retain(|c| c.is_alphanumeric() || c == '_');
         let mut rule = Rule::new(name, mem_id);
         let head_id = rule.next_membrane_id();
@@ -196,7 +196,7 @@ fn visit_atom(
     mem_id: MembraneId,
 ) -> AtomId {
     if let ASTNode::Atom { name, args, .. } = node {
-        let (name, data) = match name {
+        let (name, data) = match &name.0 {
             AtomName::Plain(s) | AtomName::Keyword(s) => (s.to_string(), Data::Empty),
             AtomName::Operator(op) => (op.to_string(), Data::Empty),
             AtomName::Int(i) => ("_int".to_owned(), Data::Int(*i)),
@@ -295,7 +295,7 @@ fn visit_membrane(node: &ASTNode, store: &mut Rule, mem_id: MembraneId) -> Membr
         ..
     } = node
     {
-        let mut mem = Membrane::new(name.clone(), mem_id);
+        let mut mem = Membrane::new(name.0.clone(), mem_id);
         let mem_id = store.next_membrane_id();
 
         for process_list in process_lists {

@@ -14,30 +14,45 @@ pub enum AtomName {
     Char(char),
 }
 
+type Spanned<T> = (T, Span);
+
 /// An AST node.
 #[derive(Debug)]
 pub enum ASTNode {
     Rule {
-        name: String,
+        /// The name of the rule.
+        /// If the rule is anonymous, the `span` will be a dummy span.
+        name: Spanned<String>,
+        /// The head of the rule.
         head: Box<ASTNode>,
+        /// The propagation part of the rule.
         propagation: Option<Box<ASTNode>>,
+        /// The guard of the rule.
         guard: Option<Box<ASTNode>>,
+        /// The body of the rule.
         body: Option<Box<ASTNode>>,
+        /// The whole span of the rule.
         span: Span,
     },
     ProcessList {
+        /// all processes in the process list
         processes: Vec<ASTNode>,
+        /// The whole span of the process list.
         span: Span,
     },
     Membrane {
-        name: String,
+        name: Spanned<String>,
         process_lists: Vec<ASTNode>,
         rules: Vec<ASTNode>,
+        /// The whole span of the membrane.
         span: Span,
     },
     Atom {
-        name: AtomName,
+        name: Spanned<AtomName>,
         args: Vec<ASTNode>,
+        /// The whole span of the atom.
+        ///
+        /// If the atom has no arguments or is operator, the span will be the same as the name.
         span: Span,
     },
     Link {
@@ -146,10 +161,16 @@ pub fn tree(p: &ASTNode, name: String) -> io::Result<Tree<String>> {
 impl ASTNode {
     pub fn name(&self) -> String {
         match self {
-            ASTNode::Rule { name, .. } => format!("Rule: {}", name),
+            ASTNode::Rule {
+                name: (name, ..), ..
+            } => format!("Rule: {}", name),
             ASTNode::ProcessList { .. } => "ProcessList".to_string(),
-            ASTNode::Membrane { name, .. } => format!("Membrane: {}", name),
-            ASTNode::Atom { name, .. } => format!("Atom: {}", name),
+            ASTNode::Membrane {
+                name: (name, ..), ..
+            } => format!("Membrane: {}", name),
+            ASTNode::Atom {
+                name: (name, ..), ..
+            } => format!("Atom: {}", name),
             ASTNode::Link {
                 name, hyperlink, ..
             } => {

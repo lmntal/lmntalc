@@ -18,7 +18,7 @@ pub(super) fn visit_guard(rule: &mut Rule, process_list: &ASTNode) -> Guard {
     if let ASTNode::ProcessList { processes, .. } = process_list {
         for process in processes {
             if let ASTNode::Atom { name, args, .. } = process {
-                match name {
+                match &name.0 {
                     // assignment
                     AtomName::Operator(Operator::Equal) => {
                         assert!(args.len() == 2);
@@ -66,7 +66,7 @@ pub(super) fn visit_guard(rule: &mut Rule, process_list: &ASTNode) -> Guard {
 
 fn transform_guard_expr(expr: &ASTNode, defined: &HashMap<String, VariableId>) -> GuardNode {
     match expr {
-        ASTNode::Atom { name, args, .. } => match name {
+        ASTNode::Atom { name, args, .. } => match &name.0 {
             AtomName::Int(i) => GuardNode::Int(*i),
             AtomName::Float(f) => GuardNode::Float(*f),
             AtomName::Operator(op) => {

@@ -250,7 +250,7 @@ impl<'lex> Parser<'lex> {
 
         ParsingResult {
             ast: ASTNode::Membrane {
-                name: "_init".to_owned(),
+                name: ("_init".to_owned(), Span::dummy()),
                 process_lists: processes,
                 rules,
                 span: Span::new(0usize.into(), self.source.source().len().into()),
@@ -269,10 +269,12 @@ impl<'lex> Parser<'lex> {
     /// distinguish them by checking if the next token is a colon dash
     fn parse_rule_or_process_list(&mut self) -> ParseResult {
         let mut name = String::new();
+        let mut name_span = Span::dummy();
         if self.look_ahead(0).kind == TokenKind::Identifier("".to_owned())
             && self.look_ahead(1).kind == TokenKind::AtAt
         {
             name = self.peek().pretty_print();
+            name_span = self.peek().span;
             self.advance_n(2);
         }
         let start = self.pos.get();
@@ -324,7 +326,7 @@ impl<'lex> Parser<'lex> {
         // if the body is empty
         if self.peek().kind == TokenKind::Dot {
             return Ok(ASTNode::Rule {
-                name,
+                name: (name, name_span),
                 head: Box::new(head),
                 propagation,
                 guard: None,
@@ -337,7 +339,7 @@ impl<'lex> Parser<'lex> {
         if self.skip(&TokenKind::Vert) {
             if self.peek().kind == TokenKind::Dot {
                 return Ok(ASTNode::Rule {
-                    name,
+                    name: (name, name_span),
                     head: Box::new(head),
                     propagation,
                     guard: Some(Box::new(guard_or_body)),
@@ -347,7 +349,7 @@ impl<'lex> Parser<'lex> {
             }
             let body = self.parse_process_list()?;
             Ok(ASTNode::Rule {
-                name,
+                name: (name, name_span),
                 head: Box::new(head),
                 propagation,
                 guard: Some(Box::new(guard_or_body)),
@@ -356,7 +358,7 @@ impl<'lex> Parser<'lex> {
             })
         } else {
             Ok(ASTNode::Rule {
-                name,
+                name: (name, name_span),
                 head: Box::new(head),
                 propagation,
                 guard: None,
@@ -402,11 +404,12 @@ impl<'lex> Parser<'lex> {
         let lhs = self.parse_expr(0)?;
         if self.peek().kind.is_relational() {
             let op = self.peek().kind.operator().unwrap();
+            let op_span = self.peek().span;
             let span = self.peek().span;
             self.advance();
             let rhs = self.parse_expr(0)?;
             Ok(ASTNode::Atom {
-                name: op.into(),
+                name: (op.into(), op_span),
                 args: vec![lhs, rhs],
                 span,
             })
@@ -423,7 +426,7 @@ impl<'lex> Parser<'lex> {
             TokenKind::Operator(op) if op == Operator::IAdd || op == Operator::ISub => {
                 let rhs = self.parse_expr(prefix_binding_power(&op))?;
                 ASTNode::Atom {
-                    name: op.into(),
+                    name: (op.into(), span),
                     args: vec![rhs],
                     span,
                 }
@@ -451,7 +454,7 @@ impl<'lex> Parser<'lex> {
             self.advance();
             let rhs = self.parse_expr(right_bp)?;
             lhs = ASTNode::Atom {
-                name: op.into(),
+                name: (op.into(), span),
                 args: vec![lhs, rhs],
                 span,
             }
@@ -484,8 +487,8 @@ impl<'lex> Parser<'lex> {
     /// Parse a membrane: {a(X,b,Y),c(X,Y). a,b,c :- e}
     fn parse_membrane(&mut self) -> ParseResult {
         let token = self.peek();
-        let span = token.span;
         let mut m_name = String::new();
+        let mut m_span = Span::dummy();
 
         if let TokenKind::Identifier(name) = &token.kind {
             // check if the name starts with a non_uppercase letter
@@ -497,6 +500,7 @@ impl<'lex> Parser<'lex> {
             }
             self.advance();
             m_name = name.clone();
+            m_span = token.span;
         }
 
         if !self.skip(&TokenKind::LeftBrace) {
@@ -533,13 +537,13 @@ impl<'lex> Parser<'lex> {
             }
         }
 
-        self.expect(&TokenKind::RightBrace)?;
+        let token = self.expect(&TokenKind::RightBrace)?;
 
         Ok(ASTNode::Membrane {
-            name: m_name,
+            name: (m_name, m_span),
             rules,
             process_lists: processes,
-            span,
+            span: m_span.merge(token.span),
         })
     }
 
@@ -588,7 +592,7 @@ impl<'lex> Parser<'lex> {
 
         if !self.skip(&TokenKind::LeftParen) {
             Ok(ASTNode::Atom {
-                name,
+                name: (name, span),
                 args: Vec::new(),
                 span,
             })
@@ -604,11 +608,11 @@ impl<'lex> Parser<'lex> {
                 }
             }
 
-            self.expect(&TokenKind::RightParen)?;
+            let token = self.expect(&TokenKind::RightParen)?;
             Ok(ASTNode::Atom {
-                name,
+                name: (name, span),
                 args: children,
-                span,
+                span: span.merge(token.span),
             })
         }
     }
