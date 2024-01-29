@@ -1,17 +1,17 @@
 use std::{io, ops::Range};
 
 use crate::{
-    analyzer::{SemanticAnalysisResult, SemanticError, SemanticWarning},
-    lexing::{self, LexError, LexErrorType},
-    parsing::{self, ParseError, ParseWarning, ParsingResult},
-    util::SourceCode,
+    analysis::{SemanticAnalysisResult, SemanticError, SemanticWarning},
+    frontend::lexing::{self, LexError, LexErrorType},
+    frontend::parsing::{self, ParseError, ParseWarning, ParsingResult},
+    util,
 };
 use ariadne::{Color, ColorGenerator, Fmt, Label, Report, Source};
 
 pub trait Reportable {
     fn labels<'a>(
         &'a self,
-        source: &'a SourceCode,
+        source: &'a util::Source,
         colors: &mut ColorGenerator,
     ) -> Vec<Label<(&str, Range<usize>)>>;
     fn message(&self) -> String;
@@ -19,19 +19,19 @@ pub trait Reportable {
 
 #[allow(unused_variables)]
 pub trait Reporter<'src> {
-    fn report_advices(&self, source: &'src SourceCode) -> io::Result<()> {
+    fn report_advices(&self, source: &'src util::Source) -> io::Result<()> {
         Ok(())
     }
 
-    fn report_warnings(&self, source: &'src SourceCode) -> io::Result<()> {
+    fn report_warnings(&self, source: &'src util::Source) -> io::Result<()> {
         Ok(())
     }
 
-    fn report_errors(&self, source: &'src SourceCode) -> io::Result<()> {
+    fn report_errors(&self, source: &'src util::Source) -> io::Result<()> {
         Ok(())
     }
 
-    fn report(&self, source: &'src SourceCode) -> io::Result<()> {
+    fn report(&self, source: &'src util::Source) -> io::Result<()> {
         self.report_advices(source)?;
         self.report_warnings(source)?;
         self.report_errors(source)
@@ -39,7 +39,7 @@ pub trait Reporter<'src> {
 }
 
 impl<'src> Reporter<'src> for SemanticAnalysisResult {
-    fn report_errors(&self, source: &'src SourceCode) -> io::Result<()> {
+    fn report_errors(&self, source: &'src util::Source) -> io::Result<()> {
         for e in &self.errors {
             let mut colors = ColorGenerator::new();
             let mut report = Report::build(
@@ -56,7 +56,7 @@ impl<'src> Reporter<'src> for SemanticAnalysisResult {
         Ok(())
     }
 
-    fn report_warnings(&self, source: &'src SourceCode) -> io::Result<()> {
+    fn report_warnings(&self, source: &'src util::Source) -> io::Result<()> {
         for w in &self.warnings {
             let mut colors = ColorGenerator::new();
             let mut report = Report::build(ariadne::ReportKind::Warning, source.name(), 0)
@@ -69,14 +69,14 @@ impl<'src> Reporter<'src> for SemanticAnalysisResult {
         Ok(())
     }
 
-    fn report(&self, source: &'src SourceCode) -> io::Result<()> {
+    fn report(&self, source: &'src util::Source) -> io::Result<()> {
         self.report_warnings(source)?;
         self.report_errors(source)
     }
 }
 
 impl<'src> Reporter<'src> for ParsingResult {
-    fn report_warnings(&self, source: &'src SourceCode) -> io::Result<()> {
+    fn report_warnings(&self, source: &'src util::Source) -> io::Result<()> {
         for warn in &self.parsing_warnings {
             let mut colors = ColorGenerator::new();
             let mut report = Report::build(
@@ -94,7 +94,7 @@ impl<'src> Reporter<'src> for ParsingResult {
         Ok(())
     }
 
-    fn report_errors(&self, source: &'src SourceCode) -> io::Result<()> {
+    fn report_errors(&self, source: &'src util::Source) -> io::Result<()> {
         for e in &self.lexing_errors {
             let mut colors = ColorGenerator::new();
             let mut report = Report::build(ariadne::ReportKind::Error, source.name(), e.offset)
@@ -150,7 +150,7 @@ impl Reportable for LexError {
 
     fn labels<'a>(
         &'a self,
-        source: &'a SourceCode,
+        source: &'a util::Source,
         colors: &mut ColorGenerator,
     ) -> Vec<Label<(&str, Range<usize>)>> {
         let mut labels = vec![];
@@ -167,7 +167,7 @@ impl Reportable for LexError {
 impl Reportable for ParseError {
     fn labels<'a>(
         &'a self,
-        source: &'a SourceCode,
+        source: &'a util::Source,
         colors: &mut ColorGenerator,
     ) -> Vec<Label<(&str, Range<usize>)>> {
         vec![Label::new((source.name(), self.span.into()))
@@ -195,7 +195,7 @@ impl Reportable for ParseError {
 impl Reportable for ParseWarning {
     fn labels<'a>(
         &'a self,
-        source: &'a SourceCode,
+        source: &'a util::Source,
         colors: &mut ColorGenerator,
     ) -> Vec<Label<(&str, Range<usize>)>> {
         vec![Label::new((source.name(), self.span.into()))
@@ -215,7 +215,7 @@ impl Reportable for ParseWarning {
 impl Reportable for SemanticError {
     fn labels<'a>(
         &'a self,
-        source: &'a SourceCode,
+        source: &'a util::Source,
         colors: &mut ColorGenerator,
     ) -> Vec<Label<(&str, Range<usize>)>> {
         let mut labels = vec![];
@@ -278,7 +278,7 @@ impl Reportable for SemanticWarning {
     #[allow(unused_variables)]
     fn labels<'a>(
         &'a self,
-        source: &'a SourceCode,
+        source: &'a util::Source,
         colors: &mut ColorGenerator,
     ) -> Vec<Label<(&str, Range<usize>)>> {
         match self {

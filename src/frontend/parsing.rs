@@ -1,16 +1,18 @@
 use std::{cell::Cell, fmt::Display};
 
 use crate::{
-    ast::{ASTNode, AtomName},
-    lexing::{LexError, Lexer},
-    token::{Operator, Token, TokenKind},
-    util::{SourceCode, Span},
+    frontend::{
+        ast::{ASTNode, AtomName},
+        lexing::{LexError, Lexer},
+        token::{Operator, Token, TokenKind},
+    },
+    util::{Source, Span},
 };
 
 /// A parser for LMNtal source code
 #[derive(Debug)]
 pub struct Parser<'lex> {
-    source: &'lex SourceCode,
+    source: &'lex Source,
     warnings: Vec<ParseWarning>,
     tokens: Vec<Token>,
     pos: Cell<usize>,
@@ -113,7 +115,7 @@ pub struct ParsingResult {
 }
 
 impl<'lex> Parser<'lex> {
-    pub fn new(source: &'lex SourceCode) -> Parser<'lex> {
+    pub fn new(source: &'lex Source) -> Parser<'lex> {
         Parser {
             source,
             warnings: Vec::new(),
@@ -708,7 +710,7 @@ fn infix_binding_power(op: &Operator) -> (u8, u8) {
 /// Initialize the parser with a phony source code and parse the given function, used for testing
 #[allow(dead_code)]
 fn common_init(source: &str, func: fn(&mut Parser) -> ParseResult) -> ParseResult {
-    let source = SourceCode::phony(source.to_owned());
+    let source = Source::phony(source.to_owned());
     let mut parser = Parser::new(&source);
     let mut lexer = Lexer::new(&source);
     let result = lexer.lex();
@@ -737,7 +739,7 @@ fn test_parse_relation() {
 
 #[test]
 fn test_compicate_process() {
-    let source = SourceCode::phony("a({X,b,Y + b} * c(e)) :- a({X + b :- k. a + c}).".to_owned());
+    let source = Source::phony("a({X,b,Y + b} * c(e)) :- a({X + b :- k. a + c}).".to_owned());
     let mut parser = Parser::new(&source);
     let result = parser.parse();
     assert!(result.parsing_errors.is_empty());
@@ -773,7 +775,7 @@ fn test_parse_rule_or_process_list() {
 
 #[test]
 fn test_parse_world() {
-    let source = SourceCode::phony("a(X,b,Y),c(X,Y). a,b \\ c :- 10.".to_owned());
+    let source = Source::phony("a(X,b,Y),c(X,Y). a,b \\ c :- 10.".to_owned());
     let mut parser = Parser::new(&source);
     let result = parser.parse();
     assert!(result.parsing_errors.is_empty());

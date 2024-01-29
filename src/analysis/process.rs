@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{ast::ASTNode, util::Span};
+use crate::{frontend::ast::ASTNode, util::Span};
 
 use super::{SemanticError, SemanticWarning};
 

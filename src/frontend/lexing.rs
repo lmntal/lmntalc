@@ -1,6 +1,6 @@
 use crate::{
-    token::{Operator, Token, TokenKind, KEYWORD},
-    util::{SourceCode, Span},
+    frontend::token::{Operator, Token, TokenKind, KEYWORD},
+    util::{Source, Span},
 };
 
 /// A lexer for LMNtal.
@@ -44,7 +44,7 @@ impl LexError {
         }
     }
 
-    pub fn to_string(&self, source: &SourceCode) -> String {
+    pub fn to_string(&self, source: &Source) -> String {
         let (line, col) = source.line_col(self.offset);
         match &self.ty {
             LexErrorType::Expected(c) => {
@@ -87,7 +87,7 @@ impl LexError {
 
 // Basic lexer functions
 impl Lexer {
-    pub fn new(src: &SourceCode) -> Self {
+    pub fn new(src: &Source) -> Self {
         Self {
             src: src.source().chars().collect(),
             offset: 0,
@@ -755,7 +755,7 @@ impl Lexer {
 fn test_lexing_number() {
     macro_rules! test_number {
         ($src:expr, $kind:expr) => {
-            let source = SourceCode::phony($src.to_owned());
+            let source = Source::phony($src.to_owned());
             let mut lexer = Lexer::new(&source);
             assert_eq!(lexer.consume_number().unwrap().kind, $kind);
         };
@@ -763,7 +763,7 @@ fn test_lexing_number() {
 
     macro_rules! wrong {
         ($src:expr) => {
-            let source = SourceCode::phony($src.to_owned());
+            let source = Source::phony($src.to_owned());
             let mut lexer = Lexer::new(&source);
             assert!(lexer.consume_number().is_err());
         };
@@ -786,7 +786,7 @@ fn test_lexing() {
     test @@ 1234 : b,c.
     "#;
 
-    let source = SourceCode::phony(source.to_owned());
+    let source = Source::phony(source.to_owned());
     let mut lexer = Lexer::new(&source);
     let result = lexer.lex();
     assert_eq!(result.errors.len(), 1);
@@ -795,7 +795,7 @@ fn test_lexing() {
 
 #[test]
 fn test_lexing_operator() {
-    let source = SourceCode::phony("'a' + b *. c =:= d".to_owned());
+    let source = Source::phony("'a' + b *. c =:= d".to_owned());
     let mut lexer = Lexer::new(&source);
     let result = lexer.lex();
     assert_eq!(result.errors.len(), 0);

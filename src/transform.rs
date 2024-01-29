@@ -1,12 +1,12 @@
 mod guard;
 
 use crate::{
-    ast::{ASTNode, AtomName},
-    data::{rule::Rule, *},
+    frontend::ast::{ASTNode, AtomName},
+    model::{rule::Rule, *},
 };
 
 use self::guard::visit_guard;
-use super::data::id::*;
+use super::model::id::*;
 
 #[derive(Debug)]
 pub enum TransformError {

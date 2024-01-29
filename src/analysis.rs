@@ -1,6 +1,6 @@
 pub mod process;
 
-use crate::{ast::ASTNode, util::Span};
+use crate::{frontend::ast::ASTNode, util::Span};
 
 use self::process::analyze_membrane;
 

@@ -106,13 +106,6 @@ macro_rules! id_without_parent {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MembraneId(u32);
 
-impl MembraneId {
-    /// Create a void membrane ID, which is a membrane ID that will never be used (perhaps).
-    pub(crate) fn void() -> Self {
-        Self::new(u32::MAX)
-    }
-}
-
 /// Hyperlink is actually an atom, but it is not stored in the atom table.
 pub type HyperlinkId = AtomId;
 

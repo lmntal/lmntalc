@@ -1,4 +1,4 @@
-use crate::token::Operator;
+use crate::frontend::token::Operator;
 use once_cell::sync::Lazy;
 use std::{collections::HashMap, fmt::Display};
 

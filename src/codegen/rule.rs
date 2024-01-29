@@ -7,12 +7,12 @@ use owo_colors::OwoColorize;
 use petgraph::{stable_graph::StableDiGraph, visit::IntoNodeReferences};
 
 use crate::{
-    data::{
+    ir::{self, LMNtalIR, Operation, VarSource},
+    model::{
         guard::{GuardNode, GuardSource, ProcessConstraint},
         id::{AtomId, HyperlinkId},
         rule::{Rule, RuleLink, RuleLinkArg},
     },
-    ir::{self, LMNtalIR, Operation, VarSource},
 };
 
 #[derive(Debug)]

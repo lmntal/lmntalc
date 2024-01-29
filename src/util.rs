@@ -152,7 +152,7 @@ impl<T> Deref for Spanned<T> {
 
 /// A source code file, with line and column information
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SourceCode {
+pub struct Source {
     /// The name of the file
     name: String,
     /// The path to the file
@@ -163,13 +163,13 @@ pub struct SourceCode {
     lines: Vec<usize>,
 }
 
-impl SourceCode {
+impl Source {
     /// Create a new SourceCode from a file
     ///
     /// The file should exist and be readable by the current user.
     ///
     /// Also, the file should be encoded in UTF-8
-    pub fn new(file: &Path) -> SourceCode {
+    pub fn new(file: &Path) -> Source {
         let name = file.file_name().unwrap().to_str().unwrap().to_string();
         let path = file.to_path_buf();
         let source = std::fs::read_to_string(file).unwrap();
@@ -181,7 +181,7 @@ impl SourceCode {
                 Some(start)
             })
             .collect();
-        SourceCode {
+        Source {
             name,
             path,
             source,
@@ -190,7 +190,7 @@ impl SourceCode {
     }
 
     /// Create a new SourceCode from a string
-    pub fn phony(source: String) -> SourceCode {
+    pub fn phony(source: String) -> Source {
         let lines = source
             .lines()
             .scan(0, |state, line| {
@@ -199,7 +199,7 @@ impl SourceCode {
                 Some(start)
             })
             .collect();
-        SourceCode {
+        Source {
             name: "<phony>".to_string(),
             path: PathBuf::new(),
             source,
@@ -235,8 +235,8 @@ impl SourceCode {
     }
 }
 
-impl From<&Path> for SourceCode {
-    fn from(other: &Path) -> SourceCode {
-        SourceCode::new(other)
+impl From<&Path> for Source {
+    fn from(other: &Path) -> Source {
+        Source::new(other)
     }
 }

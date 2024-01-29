@@ -1,6 +1,6 @@
 use clap::ValueEnum;
 
-use crate::generator::Generator;
+use crate::codegen::IRSet;
 
 pub mod cpp;
 pub mod java;
@@ -39,7 +39,7 @@ impl ValueEnum for Target {
 
 pub trait Backend {
     fn new() -> Self;
-    fn pretty_print(&mut self, generator: &Generator) -> String;
+    fn pretty_print(&mut self, generator: &IRSet) -> String;
     fn support_custom_lib(&self) -> bool {
         false
     }

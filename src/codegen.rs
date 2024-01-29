@@ -4,20 +4,29 @@ use std::{collections::HashMap, fmt::Display};
 
 use owo_colors::OwoColorize;
 
-use crate::{data::Program, ir::LMNtalIR};
+use crate::{ir::LMNtalIR, model::Program};
 
 use self::rule::{RuleGenerator, RuleIR};
 
 /// A generator for AST from LMNtal program
 #[derive(Debug, Default)]
-pub struct Generator {
+pub struct Emitter {
+    ir_set: IRSet,
+}
+
+#[derive(Debug, Default)]
+pub struct IRSet {
     pub init: Vec<LMNtalIR>,
     pub rules: Vec<RuleIR>,
 }
 
-impl Generator {
+impl Emitter {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn ir_set(&self) -> &IRSet {
+        &self.ir_set
     }
 
     /// Generate AST from LMNtal program
@@ -39,7 +48,7 @@ impl Generator {
             } else {
                 names.insert(ir.name.clone(), 1);
             }
-            self.rules.push(ir);
+            self.ir_set.rules.push(ir);
         }
     }
 
@@ -48,11 +57,11 @@ impl Generator {
         let rule = program.init_rule();
         let mut rule_gen = RuleGenerator::new(rule);
         let ir = rule_gen.generate();
-        self.init = ir.init();
+        self.ir_set.init = ir.init();
     }
 }
 
-impl Display for Generator {
+impl Display for IRSet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "{}", "Init".bold().underline().red())?;
         for ir in &self.init {

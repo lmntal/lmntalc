@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{ASTNode, AtomName},
-    data::{
+    frontend::{
+        ast::{ASTNode, AtomName},
+        token::Operator,
+    },
+    model::{
         guard::{Guard, GuardNode, GuardSource, ProcessConstraint, VariableId, RESERVED_FUNC},
         rule::Rule,
     },
-    token::Operator,
 };
 
 pub(super) fn visit_guard(rule: &mut Rule, process_list: &ASTNode) -> Guard {

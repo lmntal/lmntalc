@@ -1,8 +1,8 @@
 use std::{fmt::Display, io};
 
+use super::token::Operator;
+use crate::util::Span;
 use termtree::Tree;
-
-use crate::{token::Operator, util::Span};
 
 #[derive(Debug, Clone)]
 pub enum AtomName {

@@ -1,45 +1,43 @@
 use std::collections::HashMap;
 
 use crate::{
-    data::{guard::ProcessConstraint, Data},
-    generator::{
+    codegen::{
         rule::{Case, RuleIR},
-        Generator,
+        IRSet,
     },
     ir::{LMNtalIR, Literal, Operation},
+    model::{guard::ProcessConstraint, Data},
 };
 
 use super::Backend;
 
-static LMNTAL: &[u8] = include_bytes!("../../assets/lib/java/lmntal.java");
-static MAIN: &[u8] = include_bytes!("../../assets/lib/java/main.java");
+static LMNTAL: &[u8] = include_bytes!("../../assets/lib/cpp/lmntal.hpp");
 
-pub struct JavaBackend {
+pub struct CppBackend {
     var_type: HashMap<usize, ProcessConstraint>,
     name_map: HashMap<String, usize>,
 }
 
-impl Backend for JavaBackend {
+impl Backend for CppBackend {
     fn new() -> Self {
         Self {
             var_type: HashMap::new(),
             name_map: HashMap::new(),
         }
     }
-
-    fn pretty_print(&mut self, generator: &Generator) -> String {
+    fn pretty_print(&mut self, ir_set: &IRSet) -> String {
         let mut code = String::new();
         code.push_str(std::str::from_utf8(LMNTAL).unwrap());
-        code.push_str("class Main {\n");
-        code.push_str(&self.print_rules(&generator.rules));
-        code.push_str(&self.print_main(generator));
-        code.push_str(std::str::from_utf8(MAIN).unwrap());
-        code.push_str("\n}\n");
+        let rules = self.print_rules(&ir_set.rules);
+        let main = self.print_main(ir_set);
+        code.push_str(&self.print_name_map());
+        code.push_str(&rules);
+        code.push_str(&main);
         code
     }
 }
 
-impl JavaBackend {
+impl CppBackend {
     fn pretty_print(&mut self, ir: &LMNtalIR, indent: usize) -> String {
         let mut code = " ".repeat(indent);
         let fmt = |&source| match source {
@@ -59,42 +57,38 @@ impl JavaBackend {
             } => {
                 let name = self.get_name(name);
                 code.push_str(&format!(
-                    "var atom_{} = AtomStore.INSTANCE.createAtom({}, {});",
+                    "auto atom_{} = create_atom({}, {});",
                     id, name, arity
                 ));
                 if !data.is_empty() {
                     code.push_str(&format!("\n{}", " ".repeat(indent)));
                     match data {
                         Data::Int(i) => {
-                            code.push_str(&format!("atom_{}.setInt({});", id, i));
+                            code.push_str(&format!("atom_{}->set_int({});", id, i));
                         }
                         Data::Float(f) => {
-                            code.push_str(&format!("atom_{}.setFloat({});", id, f));
-                        }
-                        Data::Char(c) => {
-                            code.push_str(&format!("atom_{}.setChar({});", id, c));
-                        }
-                        Data::String(s) => {
-                            code.push_str(&format!("atom_{}.setString(\"{}\");", id, s));
+                            code.push_str(&format!("atom_{}->set_float({});", id, f));
                         }
                         Data::Variable(var_id) => {
                             let ty = self.var_type.get(&(*var_id).into()).unwrap();
                             code.push_str(&format!(
-                                "atom_{}.set{}(var_{});",
+                                "atom_{}->set_{}(var_{});",
                                 id,
                                 atom_type_to_string(ty),
                                 var_id
                             ));
                         }
-                        _ => {}
+                        _ => {
+                            code.push_str("#error not implemented yet");
+                        }
                     }
                 }
             }
             LMNtalIR::RemoveAtom { id } => {
-                code.push_str(&format!("AtomStore.INSTANCE.removeAtom(atom_{});", id));
+                code.push_str(&format!("remove_atom(atom_{});", id));
             }
             LMNtalIR::Link { src, dst } => {
-                code.push_str(&format!("link({}, {});", fmt(src), fmt(dst),));
+                code.push_str(&format!("link({}, {});", fmt(src), fmt(dst)));
             }
             LMNtalIR::Relink { src, src_port, dst } => {
                 code.push_str(&format!(
@@ -109,11 +103,11 @@ impl JavaBackend {
                 ProcessConstraint::Unique => unimplemented!(),
                 ProcessConstraint::Ground => unimplemented!(),
                 ProcessConstraint::Unary => {
-                    code.push_str(&format!("atom_{}.at({}).getArity() == 1", id, port,));
+                    code.push_str(&format!("atom_{}->at({})->get_arity() == 1", id, port,));
                 }
                 _ => {
                     code.push_str(&format!(
-                        "atom_{}.at({}).is{}()",
+                        "atom_{}->at({}).is_{}()",
                         id,
                         port,
                         atom_type_to_string(ty),
@@ -121,8 +115,8 @@ impl JavaBackend {
                 }
             },
             LMNtalIR::CheckValue(op) => code.push_str(&print_operation(op)),
-            LMNtalIR::DefineTempVar { id, ty, op, .. } => {
-                code.push_str(&format!("var var_{} = {};", id, print_operation(op)));
+            LMNtalIR::DefineTempVar { id, op, ty, .. } => {
+                code.push_str(&format!("auto var_{} = {};", id, print_operation(op)));
                 self.var_type.insert(*id, *ty);
             }
             LMNtalIR::CloneAtom {
@@ -131,7 +125,7 @@ impl JavaBackend {
                 from_port,
             } => {
                 code.push_str(&format!(
-                    "var atom_{} = cloneAtom(atom_{}, {});",
+                    "auto atom_{} = clone_atom(atom_{}, {});",
                     id, from_id, from_port
                 ));
             }
@@ -144,86 +138,82 @@ impl JavaBackend {
             } => {
                 let name = self.get_name(name);
                 code.push_str(&format!(
-                    "var atom_{} = atom_{}.getAtomAtPort({}, {}, {});",
+                    "auto atom_{} = get_atom_at_port(atom_{}, {}, {}, {});",
                     id, from, port, name, arity
                 ));
             }
             LMNtalIR::GetHyperlinkAtPort { id, from, port } => {
                 code.push_str(&format!(
-                    "var hl_{} = getHyperlinkAtPort(atom_{}, {});",
+                    "auto hl_{} = get_hlink_at_port(atom_{}, {});",
                     id, from, port
                 ));
             }
             LMNtalIR::RemoveAtomAt { id, port } => {
-                code.push_str(&format!("atom_{}.removeAt({});", id, port));
+                code.push_str(&format!("atom_{}->remove_at({});", id, port));
             }
             LMNtalIR::CreateHyperlink { id, name } => {
                 let name = self.get_name(name);
-                code.push_str(&format!(
-                    "var hl_{} = AtomStore.INSTANCE.createHyperlink({});",
-                    id, name
-                ));
+                code.push_str(&format!("auto hl_{} = create_hyperlink({});", id, name));
             }
             LMNtalIR::LinkToHyperlink { atom, hyperlink } => {
-                code.push_str(&format!("hl_{}.add({});", hyperlink.id(), fmt(atom)));
+                code.push_str(&format!("hl_{}->add({});", hyperlink.id(), fmt(atom)));
             }
             LMNtalIR::RemoveFromHyperlink { atom, hyperlink } => {
-                code.push_str(&format!("hl_{}.remove({});", hyperlink.id(), fmt(atom)));
+                code.push_str(&format!("hl_{}->remove({});", hyperlink.id(), fmt(atom)));
             }
             LMNtalIR::FuseHyperlink { into, from } => {
-                code.push_str(&format!("hl_{}.fuse(hl_{});", into.id(), from.id()));
+                code.push_str(&format!("hl_{}->fuse(hl_{});\n", into.id(), from.id()));
+                code.push_str(&format!(
+                    "{}remove_hyperlink(hl_{});",
+                    " ".repeat(indent),
+                    from.id()
+                ));
             }
             LMNtalIR::Unify { into, from } => {
                 code.push_str(&format!("unify({}, {});", fmt(into), fmt(from)));
             }
-            _ => unreachable!("unimplemented: {:?}", ir),
+            _ => unimplemented!(),
         }
         code
     }
 
-    fn print_main(&mut self, generator: &Generator) -> String {
+    fn print_main(&mut self, ir_set: &IRSet) -> String {
         let mut code = String::new();
-        code.push_str(
-            "    public static String getName(int name) {\n        return switch (name) {\n",
-        );
-        for (name, id) in &self.name_map {
-            code.push_str(&format!("            case {} -> \"{}\";\n", id, name));
-        }
-        code.push_str("            default -> \"\";\n        };\n    }\n\n");
-
-        // main function
-        code.push_str("    public static void main(String[] args) {\n");
-        for node in &generator.init {
-            code.push_str(&self.pretty_print(node, 8));
+        code.push_str("int main() {\n");
+        for node in &ir_set.init {
+            code.push_str(&self.pretty_print(node, 2));
             code.push('\n');
         }
 
-        let rules = generator.rules.len();
+        let rules = ir_set.rules.len();
 
-        code.push_str(&format!("        var rule_fail = new BitSet({});\n", rules));
-        code.push_str("        var rules = new Rule[]{\n");
+        code.push_str(&format!("  std::bitset<{}> rule_fail;\n", rules));
+        code.push_str(&format!(
+            "  constexpr rule rules[{}] = {{\n",
+            ir_set.rules.len()
+        ));
 
-        for rule in &generator.rules {
-            code.push_str(&format!("{}new {}(),\n", " ".repeat(12), rule.name));
+        for rule in &ir_set.rules {
+            code.push_str(&format!("    {},\n", rule.name));
         }
 
-        code.push_str("        };\n");
+        code.push_str("  };\n");
 
-        code.push_str("        Random rng = new Random();\n");
+        code.push_str("  std::mt19937 rng(std::random_device{}());\n");
         code.push_str(&format!(
-            r#"        while (rule_fail.cardinality() != {rules}) {{
-            var rand = rng.nextInt({rules});
-            if (rules[rand].apply()) {{
-                rule_fail.clear();
-            }} else {{
-                rule_fail.set(rand);
-            }}
-        }}
-        dumpAtoms();
+            r#"  while (!rule_fail.all()) {{
+    auto const rand = rng() % {rules};
+    if (rules[rand]()) {{
+      rule_fail.reset();
+    }} else {{
+      rule_fail.set(rand);
+    }}
+  }}
+  dump_atoms();
 "#,
         ));
 
-        code.push_str("    }\n\n");
+        code.push_str("}\n");
         code
     }
 
@@ -237,11 +227,8 @@ impl JavaBackend {
 
     fn print_rule(&mut self, rule: &RuleIR) -> String {
         let mut code = String::new();
-        let mut indent = 12;
-        code.push_str(&format!(
-            "    static class {} implements Rule {{\n        @Override\n        public boolean apply() {{\n",
-            rule.name
-        ));
+        let mut indent = 2;
+        code.push_str(&format!("bool {}() {{\n", rule.name));
 
         for ir in &rule.pattern {
             code.push_str(&self.print_pattern(ir, &mut indent));
@@ -253,12 +240,12 @@ impl JavaBackend {
             code.push('\n');
         }
 
-        while indent > 12 {
-            indent -= 4;
+        while indent > 2 {
+            indent -= 2;
             code.push_str(&format!("{}}}\n", " ".repeat(indent)));
         }
 
-        code.push_str("            return false;\n        }\n    }\n\n");
+        code.push_str("  return false;\n}\n\n");
         code
     }
 
@@ -267,39 +254,34 @@ impl JavaBackend {
         match ir {
             LMNtalIR::FindAtom { id, name, arity } => {
                 let name = self.get_name(name);
-                let it = format!("it_{}", id);
                 code.push_str(&format!(
-                    "{}for (var {} = findAtom({}, {}).iterator(); {}.hasNext(); ) {{\n{}var atom_{} = {}.next();\n",
+                    "{}for (auto atom_{} : find_atom({}, {})) {{\n",
                     " ".repeat(*indent),
-                    it,
-                    name,
-                    arity,
-                    it,
-                    " ".repeat(*indent+4),
                     id,
-                    it,
+                    name,
+                    arity
                 ));
-                *indent += 4;
+                *indent += 2;
             }
             LMNtalIR::GetAtomAtPort { id, .. } => {
                 code.push_str(&self.pretty_print(ir, *indent));
-                code.push_str(&format!(" if (atom_{} == null) continue;\n", id));
+                code.push_str(&format!(" if (!atom_{}) continue;\n", id));
             }
             LMNtalIR::GetHyperlinkAtPort { id, .. } => {
                 code.push_str(&self.pretty_print(ir, *indent));
-                code.push_str(&format!(" if (hl_{} == null) continue;\n", id));
+                code.push_str(&format!(" if (!hl_{}) continue;\n", id));
             }
             LMNtalIR::AtomEqualityIdPort { id_port_list, eq } => {
                 if *eq {
-                    code.push_str(&format!("{}if (!Main.equals(", " ".repeat(*indent)));
+                    code.push_str(&format!("{}if (!equals(", " ".repeat(*indent)));
                 } else {
-                    code.push_str(&format!("{}if (Main.equals(", " ".repeat(*indent)));
+                    code.push_str(&format!("{}if (equals(", " ".repeat(*indent)));
                 }
                 for (i, (id, port)) in id_port_list.iter().enumerate() {
                     if i != 0 {
                         code.push_str(", ");
                     }
-                    code.push_str(&format!("atom_{}.at({})", id, port,));
+                    code.push_str(&format!("atom_{}->at({})", id, port,));
                 }
                 code.push_str(")) continue;\n");
             }
@@ -309,25 +291,26 @@ impl JavaBackend {
                 hyperlinks,
             } => {
                 if *eq {
-                    code.push_str(&format!("{}if (!Main.equals(", " ".repeat(*indent)));
+                    code.push_str(&format!("{}if (!equals(", " ".repeat(*indent)));
                 } else {
-                    code.push_str(&format!("{}if (Main.equals(", " ".repeat(*indent)));
+                    code.push_str(&format!("{}if (equals(", " ".repeat(*indent)));
                 }
                 if *hyperlinks {
                     for (i, id) in id_list.iter().enumerate() {
                         if i != 0 {
                             code.push_str(", ");
                         }
-                        code.push_str(&format!("hl_{}", id,));
+                        code.push_str(&format!("hl_{}", id));
                     }
                 } else {
                     for (i, id) in id_list.iter().enumerate() {
                         if i != 0 {
                             code.push_str(", ");
                         }
-                        code.push_str(&format!("atom_{}", id,));
+                        code.push_str(&format!("atom_{}", id));
                     }
                 }
+
                 code.push_str(")) continue;\n");
             }
             _ => {
@@ -351,7 +334,7 @@ impl JavaBackend {
                 code.push('\n');
             }
 
-            code.push_str(&format!("{}return true;\n", " ".repeat(*indent)));
+            code.push_str(&format!("{}return true;", " ".repeat(*indent)));
 
             return code;
         }
@@ -374,7 +357,7 @@ impl JavaBackend {
             code.push_str(&format!("))\n{}continue;\n", " ".repeat(*indent + 2)));
         } else {
             code.push_str(") {\n");
-            *indent += 4;
+            *indent += 2;
         }
 
         for ir in &case.definition {
@@ -391,12 +374,24 @@ impl JavaBackend {
             code.push_str(&format!(
                 "{}return true;\n{}}}",
                 " ".repeat(*indent),
-                " ".repeat(*indent - 4)
+                " ".repeat(*indent - 2)
             ));
-            *indent -= 4;
+            *indent -= 2;
         } else {
-            code.push_str(&format!("{}return true;\n", " ".repeat(*indent)));
+            code.push_str(&format!("{}return true;", " ".repeat(*indent)));
         }
+
+        code
+    }
+
+    fn print_name_map(&self) -> String {
+        let mut code =
+            String::from("constexpr std::string_view int2str(name_t const n) {\n  switch (n) {\n");
+
+        for (name, id) in &self.name_map {
+            code.push_str(&format!("    case {}: return \"{}\";\n", id, name));
+        }
+        code.push_str("    default: return \"unknown\";\n  }\n}\n\n");
 
         code
     }
@@ -418,14 +413,19 @@ fn print_operation(op: &Operation) -> String {
             Literal::Int(i) => i.to_string(),
             Literal::Float(f) => f.to_string(),
             Literal::Char(c) => c.to_string(),
-            Literal::String(s) => format!("\"{}\"", s),
+            Literal::String(s) => format!("std::string(\"{}\")", s),
         },
         Operation::Variable { source, ty_ } => match source {
             crate::ir::VarSource::Head(id, port) | crate::ir::VarSource::Body(id, port) => {
                 if *ty_ == ProcessConstraint::Hyperlink {
-                    format!("getHyperlinkAtPort(atom_{}, {})", id, port)
+                    format!("get_hlink_at_port(atom_{}, {})", id, port)
                 } else {
-                    format!("atom_{}.at({}).get{}()", id, port, atom_type_to_string(ty_))
+                    format!(
+                        "atom_{}->at({}).get_{}()",
+                        id,
+                        port,
+                        atom_type_to_string(ty_)
+                    )
                 }
             }
             crate::ir::VarSource::Variable(id) => {
@@ -463,7 +463,7 @@ fn print_operation(op: &Operation) -> String {
             )
         }
         Operation::FunctionCall { name, args, ty_ } => {
-            if crate::data::guard::RESERVED_FUNC
+            if crate::model::guard::RESERVED_FUNC
                 .iter()
                 .any(|func| func.name == name)
             {
@@ -477,19 +477,19 @@ fn print_operation(op: &Operation) -> String {
 
 fn print_reserved_func(name: &str, args: &[Operation], _type: &ProcessConstraint) -> String {
     match name {
-        "num" => format!("{}.getArity()", print_operation(&args[0])),
+        "num" => format!("{}->get_arity()", print_operation(&args[0])),
         _ => unimplemented!(),
     }
 }
 
 fn atom_type_to_string(ty: &ProcessConstraint) -> String {
     match ty {
-        ProcessConstraint::Int => "Int".into(),
-        ProcessConstraint::Float => "Float".into(),
+        ProcessConstraint::Int => "int".into(),
+        ProcessConstraint::Float => "float".into(),
         ProcessConstraint::Unique => unimplemented!(),
         ProcessConstraint::Ground => unimplemented!(),
         ProcessConstraint::Unary => unimplemented!(),
-        ProcessConstraint::String => "String".into(),
+        ProcessConstraint::String => "string".into(),
         ProcessConstraint::Hyperlink => unimplemented!(),
     }
 }

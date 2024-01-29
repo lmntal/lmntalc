@@ -5,14 +5,16 @@ use std::{
 
 use clap::Parser;
 use lmntalc::{
-    analyzer::analyze,
-    ast::tree,
-    backend::{cpp::CppBackend, java::JavaBackend, python::PythonBackend, Backend, Target},
-    generator::Generator,
-    parsing::{self},
+    analysis::analyze,
+    codegen::{Emitter, IRSet},
+    frontend::{
+        ast::tree,
+        parsing::{self},
+    },
     report::Reporter,
+    target::{cpp::CppBackend, java::JavaBackend, python::PythonBackend, Backend, Target},
     transform::transform_lmntal,
-    util::SourceCode,
+    util::Source,
 };
 use owo_colors::OwoColorize;
 
@@ -65,7 +67,7 @@ fn main() -> io::Result<()> {
         panic!("Not a file: {}", path.display());
     }
 
-    let code = SourceCode::new(&cli.source);
+    let code = Source::new(&cli.source);
     let mut parser = parsing::Parser::new(&code);
     let res = parser.parse();
     res.report(&code)?;
@@ -75,8 +77,9 @@ fn main() -> io::Result<()> {
 
     let transform_res = transform_lmntal(&res.ast);
 
-    let mut gen = Generator::new();
+    let mut gen = Emitter::new();
     gen.generate(&transform_res.program);
+    let ir = gen.ir_set();
 
     if cli.dump_ast {
         let t = tree(&res.ast, "Root membrane".to_owned());
@@ -87,7 +90,7 @@ fn main() -> io::Result<()> {
     }
 
     if cli.show_ir {
-        println!("{}\n{}", "Compiled IR:".bold().underline(), gen);
+        println!("{}\n{}", "Compiled IR:".bold().underline(), ir);
     }
 
     if cli.parse_only {
@@ -108,15 +111,15 @@ fn main() -> io::Result<()> {
     let code = match cli.target {
         Target::Cpp => {
             let mut backend = CppBackend::new();
-            output(&mut backend, &gen, &cli)
+            output(&mut backend, ir, &cli)
         }
         Target::Python => {
             let mut backend = PythonBackend::new();
-            output(&mut backend, &gen, &cli)
+            output(&mut backend, ir, &cli)
         }
         Target::Java => {
             let mut backend = JavaBackend::new();
-            output(&mut backend, &gen, &cli)
+            output(&mut backend, ir, &cli)
         }
     };
 
@@ -127,6 +130,6 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-fn output(backend: &mut impl Backend, generator: &Generator, arg: &Cli) -> String {
-    backend.pretty_print(generator)
+fn output(backend: &mut impl Backend, ir_set: &IRSet, arg: &Cli) -> String {
+    backend.pretty_print(ir_set)
 }

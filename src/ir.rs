@@ -1,8 +1,8 @@
 use std::fmt::Display;
 
 use crate::{
-    data::{guard::ProcessConstraint, Data},
-    token::Operator,
+    frontend::token::Operator,
+    model::{guard::ProcessConstraint, Data},
 };
 
 use owo_colors::OwoColorize;
