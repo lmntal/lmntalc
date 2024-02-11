@@ -7,10 +7,7 @@ use clap::Parser;
 use lmntalc::{
     analysis::analyze,
     codegen::{Emitter, IRSet},
-    frontend::{
-        ast::tree,
-        parsing::{self},
-    },
+    frontend::{ast::tree, lexing, parsing},
     report::Reporter,
     target::{cpp::CppBackend, java::JavaBackend, python::PythonBackend, Backend, Target},
     transform::transform_lmntal,
@@ -67,9 +64,12 @@ fn main() -> io::Result<()> {
         panic!("Not a file: {}", path.display());
     }
 
-    let code = Source::new(&cli.source);
-    let mut parser = parsing::Parser::new(&code);
-    let res = parser.parse();
+    let code = Source::from_file(&cli.source);
+    let mut lexer = lexing::Lexer::new(&code);
+    let mut parser = parsing::Parser::new();
+    let lex_res = lexer.lex();
+    lex_res.report(&code)?;
+    let res = parser.parse(lex_res.tokens);
     res.report(&code)?;
 
     let analysis_res = analyze(&res.ast);

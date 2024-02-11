@@ -1,12 +1,13 @@
 use crate::{
     frontend::token::{Operator, Token, TokenKind, KEYWORD},
-    util::{Source, Span},
+    util::{Pos, Source, Span},
 };
 
 /// A lexer for LMNtal.
 #[derive(Debug, Clone)]
-pub struct Lexer {
-    src: Vec<char>,
+pub struct Lexer<'src> {
+    chars: Vec<char>,
+    src: &'src Source,
     offset: usize,
 }
 
@@ -16,7 +17,7 @@ pub enum LexErrorType {
     /// Unexpected character with the character
     UnexpectedCharacter(char),
     /// Unclosed bracket with the character and the offset of the pair
-    UnmatchedBracket(char, usize),
+    UnmatchedBracket(char, Pos),
     UncompleteNumber,
     UncompleteString,
     UnclosedQuote,
@@ -25,7 +26,7 @@ pub enum LexErrorType {
 
 #[derive(Clone, Debug)]
 pub struct LexError {
-    pub offset: usize,
+    pub pos: Pos,
     pub ty: LexErrorType,
     pub recoverable: Option<(TokenKind, usize)>,
 }
@@ -45,7 +46,7 @@ impl LexError {
     }
 
     pub fn to_string(&self, source: &Source) -> String {
-        let (line, col) = source.line_col(self.offset);
+        let (line, col) = self.pos.line_col();
         match &self.ty {
             LexErrorType::Expected(c) => {
                 format!("{}:{}:{}: expected '{}'", source.name(), line, col, c)
@@ -72,7 +73,7 @@ impl LexError {
                 format!("{}:{}:{}: unclosed comment", source.name(), line, col)
             }
             LexErrorType::UnmatchedBracket(c, offset) => {
-                let (pair_line, pair_col) = source.line_col(*offset);
+                let (pair_line, pair_col) = offset.line_col();
                 format!(
                     "{}:{}:{}: unclosed bracket '{}'",
                     source.name(),
@@ -86,29 +87,35 @@ impl LexError {
 }
 
 // Basic lexer functions
-impl Lexer {
-    pub fn new(src: &Source) -> Self {
+impl<'src> Lexer<'src> {
+    pub fn new(src: &'src Source) -> Self {
         Self {
-            src: src.source().chars().collect(),
+            src,
+            chars: src.source().chars().collect(),
             offset: 0,
         }
     }
 
+    fn cur_pos(&self) -> Pos {
+        let (line, column) = self.src.line_col(self.offset);
+        Pos::new(self.offset as u32, line as u32, column as u32)
+    }
+
     fn next(&mut self) -> Option<char> {
-        if self.offset >= self.src.len() {
+        if self.offset >= self.chars.len() {
             None
         } else {
-            let c = self.src[self.offset];
+            let c = self.chars[self.offset];
             self.offset += 1;
             Some(c)
         }
     }
 
     fn peek(&mut self) -> Option<char> {
-        if self.offset >= self.src.len() {
+        if self.offset >= self.chars.len() {
             None
         } else {
-            Some(self.src[self.offset])
+            Some(self.chars[self.offset])
         }
     }
 
@@ -134,12 +141,12 @@ impl Lexer {
 type LexResult = Result<Token, LexError>;
 
 // Atoms
-impl Lexer {
+impl<'src> Lexer<'src> {
     fn consume_number(&mut self) -> LexResult {
         // hex: 0x[0-9a-fA-F]+
         // dec: [0-9]+
         // float: [0-9]+.[0-9]+
-        let start = self.offset;
+        let start = self.cur_pos();
         match self.peek() {
             Some('0') => {
                 self.next();
@@ -149,13 +156,13 @@ impl Lexer {
                         let s = self.take_while(|c| c.is_ascii_hexdigit());
                         if s.is_empty() {
                             return Err(LexError {
-                                offset: self.offset,
+                                pos: self.cur_pos(),
                                 ty: LexErrorType::UncompleteNumber,
                                 recoverable: None,
                             });
                         }
-                        let end = self.offset;
-                        let span = Span::new(start.into(), end.into());
+                        let end = self.cur_pos();
+                        let span = Span::new(start, end);
 
                         Ok(Token::new(span, i64::from_str_radix(&s, 16).unwrap()))
                     }
@@ -165,10 +172,10 @@ impl Lexer {
                         if frac.is_empty() {
                             // the dot may be end of a process list
                             self.rewind(1); // rewind the dot
-                            return Ok(Token::new(Span::new(start.into(), self.offset.into()), 0));
+                            return Ok(Token::new(Span::new(start, self.cur_pos()), 0));
                         }
-                        let end = self.offset;
-                        let span = Span::new(start.into(), end.into());
+                        let end = self.cur_pos();
+                        let span = Span::new(start, end);
                         let s = format!("0.{}", frac);
                         Ok(Token::new(span, s.parse::<f64>().unwrap()))
                     }
@@ -176,7 +183,7 @@ impl Lexer {
                         if let Some(c) = self.peek() {
                             if c.is_ascii_alphabetic() {
                                 return Err(LexError {
-                                    offset: self.offset,
+                                    pos: self.cur_pos(),
                                     ty: LexErrorType::UncompleteNumber,
                                     recoverable: None,
                                 });
@@ -184,10 +191,10 @@ impl Lexer {
                         }
                         let s = self.take_while(|c| c.is_ascii_digit());
                         if s.is_empty() {
-                            return Ok(Token::new(Span::new(start.into(), self.offset.into()), 0));
+                            return Ok(Token::new(Span::new(start, self.cur_pos()), 0));
                         }
-                        let end = self.offset;
-                        let span = Span::new(start.into(), end.into());
+                        let end = self.cur_pos();
+                        let span = Span::new(start, end);
                         Ok(Token::new(span, s.parse::<i64>().unwrap()))
                     }
                 }
@@ -196,7 +203,7 @@ impl Lexer {
                 let s = self.take_while(|c| c.is_ascii_digit());
                 if s.is_empty() {
                     return Err(LexError {
-                        offset: self.offset,
+                        pos: self.cur_pos(),
                         ty: LexErrorType::UncompleteNumber,
                         recoverable: None,
                     });
@@ -204,20 +211,20 @@ impl Lexer {
                 if self.peek() == Some('.') {
                     self.next();
                     let frac = self.take_while(|c| c.is_ascii_digit());
-                    let end = self.offset;
-                    let span = Span::new(start.into(), end.into());
+                    let end = self.cur_pos();
+                    let span = Span::new(start, end);
                     if frac.is_empty() {
                         self.rewind(1);
-                        let end = self.offset;
-                        let span = Span::new(start.into(), end.into());
+                        let end = self.cur_pos();
+                        let span = Span::new(start, end);
                         Ok(Token::new(span, s.parse::<i64>().unwrap()))
                     } else {
                         let s = format!("{}.{}", s, frac);
                         Ok(Token::new(span, s.parse::<f64>().unwrap()))
                     }
                 } else {
-                    let end = self.offset;
-                    let span = Span::new(start.into(), end.into());
+                    let end = self.cur_pos();
+                    let span = Span::new(start, end);
                     Ok(Token::new(span, s.parse::<i64>().unwrap()))
                 }
             }
@@ -225,10 +232,10 @@ impl Lexer {
     }
 
     fn consume_ident(&mut self) -> LexResult {
-        let start = self.offset;
+        let start = self.cur_pos();
         let s = self.take_while(|c| c.is_ascii_alphanumeric() || c == '_');
-        let end = self.offset;
-        let span = Span::new(start.into(), end.into());
+        let end = self.cur_pos();
+        let span = Span::new(start, end);
         if KEYWORD.contains(&s.as_str()) {
             Ok(Token::new(span, TokenKind::Keyword(s)))
         } else {
@@ -238,22 +245,22 @@ impl Lexer {
 
     fn consume_char(&mut self) -> LexResult {
         self.next();
-        let start = self.offset;
+        let start = self.cur_pos();
         match self.next() {
             Some(c) => {
                 if self.next() != Some('\'') {
                     return Err(LexError {
-                        offset: self.offset,
+                        pos: self.cur_pos(),
                         ty: LexErrorType::UnclosedQuote,
                         recoverable: None,
                     });
                 }
-                let end = self.offset;
-                let span = Span::new(start.into(), end.into());
+                let end = self.cur_pos();
+                let span = Span::new(start, end);
                 Ok(Token::new(span, TokenKind::Char(c)))
             }
             None => Err(LexError {
-                offset: self.offset,
+                pos: self.cur_pos(),
                 ty: LexErrorType::UnclosedQuote,
                 recoverable: None,
             }),
@@ -261,7 +268,7 @@ impl Lexer {
     }
 
     fn consume_string(&mut self) -> LexResult {
-        let start = self.offset;
+        let start = self.cur_pos();
         let mut s = String::new();
         let mut terminated = false;
         self.next();
@@ -286,24 +293,24 @@ impl Lexer {
         }
         if !terminated {
             return Err(LexError {
-                offset: self.offset,
+                pos: self.cur_pos(),
                 ty: LexErrorType::UncompleteString,
                 recoverable: None,
             });
         }
-        let end = self.offset;
-        let span = Span::new(start.into(), end.into());
+        let end = self.cur_pos();
+        let span = Span::new(start, end);
         Ok(Token::new(span, s))
     }
 }
 
-impl Lexer {
+impl<'src> Lexer<'src> {
     pub fn lex(&mut self) -> LexingResult {
         let mut tokens = Vec::new();
         let mut errors = Vec::new();
         let mut bracket_stack = Vec::new();
         while let Some(c) = self.peek() {
-            let start = self.offset;
+            let start = self.cur_pos();
             let kind = match c {
                 '0'..='9' => self.consume_number(),
                 'a'..='z' | 'A'..='Z' | '_' => self.consume_ident(),
@@ -311,37 +318,35 @@ impl Lexer {
                 '\'' => self.consume_char(),
                 ',' | '.' | '|' | '!' | '$' => {
                     self.next();
-                    Ok(Token::new(Span::new(start.into(), self.offset.into()), c))
+                    Ok(Token::new(Span::new(start, self.cur_pos()), c))
                 }
                 '(' => {
                     self.next();
                     bracket_stack.push((start, '('));
-                    Ok(Token::new(Span::new(start.into(), self.offset.into()), '('))
+                    Ok(Token::new(Span::new(start, self.cur_pos()), '('))
                 }
                 '[' => {
                     self.next();
                     bracket_stack.push((start, '['));
-                    Ok(Token::new(Span::new(start.into(), self.offset.into()), '['))
+                    Ok(Token::new(Span::new(start, self.cur_pos()), '['))
                 }
                 '{' => {
                     self.next();
                     bracket_stack.push((start, '{'));
-                    Ok(Token::new(Span::new(start.into(), self.offset.into()), '{'))
+                    Ok(Token::new(Span::new(start, self.cur_pos()), '{'))
                 }
                 ')' => {
                     self.next();
                     match bracket_stack.pop() {
-                        Some((_, '(')) => {
-                            Ok(Token::new(Span::new(start.into(), self.offset.into()), ')'))
-                        }
+                        Some((_, '(')) => Ok(Token::new(Span::new(start, self.cur_pos()), ')')),
                         Some((pair, _)) => Err(LexError {
-                            offset: self.offset,
+                            pos: self.cur_pos(),
                             ty: LexErrorType::UnmatchedBracket('(', pair),
                             recoverable: None,
                         }),
                         _ => Err(LexError {
-                            offset: self.offset,
-                            ty: LexErrorType::UnmatchedBracket('(', 0),
+                            pos: self.cur_pos(),
+                            ty: LexErrorType::UnmatchedBracket('(', Pos::default()),
                             recoverable: None,
                         }),
                     }
@@ -349,17 +354,15 @@ impl Lexer {
                 ']' => {
                     self.next();
                     match bracket_stack.pop() {
-                        Some((_, '[')) => {
-                            Ok(Token::new(Span::new(start.into(), self.offset.into()), ']'))
-                        }
+                        Some((_, '[')) => Ok(Token::new(Span::new(start, self.cur_pos()), ']')),
                         Some((pair, _)) => Err(LexError {
-                            offset: self.offset,
+                            pos: self.cur_pos(),
                             ty: LexErrorType::UnmatchedBracket('[', pair),
                             recoverable: None,
                         }),
                         _ => Err(LexError {
-                            offset: self.offset,
-                            ty: LexErrorType::UnmatchedBracket('[', 0),
+                            pos: self.cur_pos(),
+                            ty: LexErrorType::UnmatchedBracket('[', Pos::default()),
                             recoverable: None,
                         }),
                     }
@@ -367,17 +370,15 @@ impl Lexer {
                 '}' => {
                     self.next();
                     match bracket_stack.pop() {
-                        Some((_, '{')) => {
-                            Ok(Token::new(Span::new(start.into(), self.offset.into()), '}'))
-                        }
+                        Some((_, '{')) => Ok(Token::new(Span::new(start, self.cur_pos()), '}')),
                         Some((pair, _)) => Err(LexError {
-                            offset: self.offset,
+                            pos: self.cur_pos(),
                             ty: LexErrorType::UnmatchedBracket('{', pair),
                             recoverable: None,
                         }),
                         _ => Err(LexError {
-                            offset: self.offset,
-                            ty: LexErrorType::UnmatchedBracket('{', 0),
+                            pos: self.cur_pos(),
+                            ty: LexErrorType::UnmatchedBracket('{', Pos::default()),
                             recoverable: None,
                         }),
                     }
@@ -388,12 +389,12 @@ impl Lexer {
                         Some('@') => {
                             self.next();
                             Ok(Token::new(
-                                Span::new(start.into(), self.offset.into()),
+                                Span::new(start, self.cur_pos()),
                                 TokenKind::AtAt,
                             ))
                         }
                         _ => Err(LexError {
-                            offset: self.offset,
+                            pos: self.cur_pos(),
                             ty: LexErrorType::Expected('@'),
                             recoverable: Some((TokenKind::AtAt, tokens.len())),
                         }),
@@ -405,12 +406,12 @@ impl Lexer {
                         Some('-') => {
                             self.next();
                             Ok(Token::new(
-                                Span::new(start.into(), self.offset.into()),
+                                Span::new(start, self.cur_pos()),
                                 TokenKind::ColonDash,
                             ))
                         }
                         _ => Err(LexError {
-                            offset: self.offset,
+                            pos: self.cur_pos(),
                             ty: LexErrorType::Expected('-'),
                             recoverable: Some((TokenKind::ColonDash, tokens.len())),
                         }),
@@ -426,12 +427,12 @@ impl Lexer {
                         Some('.') => {
                             self.next();
                             Ok(Token::new(
-                                Span::new(start.into(), self.offset.into()),
+                                Span::new(start, self.cur_pos()),
                                 TokenKind::Operator(Operator::FAdd),
                             ))
                         }
                         _ => Ok(Token::new(
-                            Span::new(start.into(), self.offset.into()),
+                            Span::new(start, self.cur_pos()),
                             TokenKind::Operator(Operator::IAdd),
                         )),
                     }
@@ -442,12 +443,12 @@ impl Lexer {
                         Some('.') => {
                             self.next();
                             Ok(Token::new(
-                                Span::new(start.into(), self.offset.into()),
+                                Span::new(start, self.cur_pos()),
                                 TokenKind::Operator(Operator::FSub),
                             ))
                         }
                         _ => Ok(Token::new(
-                            Span::new(start.into(), self.offset.into()),
+                            Span::new(start, self.cur_pos()),
                             TokenKind::Operator(Operator::ISub),
                         )),
                     }
@@ -458,12 +459,12 @@ impl Lexer {
                         Some('.') => {
                             self.next();
                             Ok(Token::new(
-                                Span::new(start.into(), self.offset.into()),
+                                Span::new(start, self.cur_pos()),
                                 TokenKind::Operator(Operator::FMul),
                             ))
                         }
                         _ => Ok(Token::new(
-                            Span::new(start.into(), self.offset.into()),
+                            Span::new(start, self.cur_pos()),
                             TokenKind::Operator(Operator::IMul),
                         )),
                     }
@@ -474,7 +475,7 @@ impl Lexer {
                         Some('.') => {
                             self.next();
                             Ok(Token::new(
-                                Span::new(start.into(), self.offset.into()),
+                                Span::new(start, self.cur_pos()),
                                 TokenKind::Operator(Operator::FDiv),
                             ))
                         }
@@ -500,7 +501,7 @@ impl Lexer {
                             continue;
                         }
                         _ => Ok(Token::new(
-                            Span::new(start.into(), self.offset.into()),
+                            Span::new(start, self.cur_pos()),
                             TokenKind::Operator(Operator::IDiv),
                         )),
                     }
@@ -508,7 +509,7 @@ impl Lexer {
                 '%' => {
                     self.next();
                     Ok(Token::new(
-                        Span::new(start.into(), self.offset.into()),
+                        Span::new(start, self.cur_pos()),
                         TokenKind::Operator(Operator::IMod),
                     ))
                 }
@@ -518,7 +519,7 @@ impl Lexer {
                         Some('.') => {
                             self.next();
                             Ok(Token::new(
-                                Span::new(start.into(), self.offset.into()),
+                                Span::new(start, self.cur_pos()),
                                 TokenKind::Operator(Operator::FGt),
                             ))
                         }
@@ -528,12 +529,12 @@ impl Lexer {
                                 Some('.') => {
                                     self.next();
                                     Ok(Token::new(
-                                        Span::new(start.into(), self.offset.into()),
+                                        Span::new(start, self.cur_pos()),
                                         TokenKind::Operator(Operator::FGe),
                                     ))
                                 }
                                 _ => Ok(Token::new(
-                                    Span::new(start.into(), self.offset.into()),
+                                    Span::new(start, self.cur_pos()),
                                     TokenKind::Operator(Operator::IGe),
                                 )),
                             }
@@ -543,12 +544,12 @@ impl Lexer {
                             if let Some('<') = self.peek() {
                                 self.next();
                                 Ok(Token::new(
-                                    Span::new(start.into(), self.offset.into()),
+                                    Span::new(start, self.cur_pos()),
                                     TokenKind::Operator(Operator::HyperlinkFuse),
                                 ))
                             } else {
                                 Err(LexError {
-                                    offset: self.offset,
+                                    pos: self.cur_pos(),
                                     ty: LexErrorType::Expected('<'),
                                     recoverable: Some((
                                         TokenKind::Operator(Operator::HyperlinkUnify),
@@ -560,19 +561,19 @@ impl Lexer {
                         Some('<') => {
                             self.next();
                             Ok(Token::new(
-                                Span::new(start.into(), self.offset.into()),
+                                Span::new(start, self.cur_pos()),
                                 TokenKind::Operator(Operator::HyperlinkFuse),
                             ))
                         }
                         Some('>') => {
                             self.next();
                             Ok(Token::new(
-                                Span::new(start.into(), self.offset.into()),
+                                Span::new(start, self.cur_pos()),
                                 TokenKind::Operator(Operator::HyperlinkUnify),
                             ))
                         }
                         _ => Ok(Token::new(
-                            Span::new(start.into(), self.offset.into()),
+                            Span::new(start, self.cur_pos()),
                             TokenKind::Operator(Operator::IGt),
                         )),
                     }
@@ -583,7 +584,7 @@ impl Lexer {
                         Some('.') => {
                             self.next();
                             Ok(Token::new(
-                                Span::new(start.into(), self.offset.into()),
+                                Span::new(start, self.cur_pos()),
                                 TokenKind::Operator(Operator::FLt),
                             ))
                         }
@@ -593,12 +594,12 @@ impl Lexer {
                                 Some('.') => {
                                     self.next();
                                     Ok(Token::new(
-                                        Span::new(start.into(), self.offset.into()),
+                                        Span::new(start, self.cur_pos()),
                                         TokenKind::Operator(Operator::FLe),
                                     ))
                                 }
                                 _ => Ok(Token::new(
-                                    Span::new(start.into(), self.offset.into()),
+                                    Span::new(start, self.cur_pos()),
                                     TokenKind::Operator(Operator::ILe),
                                 )),
                             }
@@ -606,12 +607,12 @@ impl Lexer {
                         Some('<') => {
                             self.next();
                             Ok(Token::new(
-                                Span::new(start.into(), self.offset.into()),
+                                Span::new(start, self.cur_pos()),
                                 TokenKind::Operator(Operator::HyperlinkUnify),
                             ))
                         }
                         _ => Ok(Token::new(
-                            Span::new(start.into(), self.offset.into()),
+                            Span::new(start, self.cur_pos()),
                             TokenKind::Operator(Operator::ILt),
                         )),
                     }
@@ -628,18 +629,18 @@ impl Lexer {
                                         Some('.') => {
                                             self.next();
                                             Ok(Token::new(
-                                                Span::new(start.into(), self.offset.into()),
+                                                Span::new(start, self.cur_pos()),
                                                 TokenKind::Operator(Operator::FEq),
                                             ))
                                         }
                                         _ => Ok(Token::new(
-                                            Span::new(start.into(), self.offset.into()),
+                                            Span::new(start, self.cur_pos()),
                                             TokenKind::Operator(Operator::IEq),
                                         )),
                                     }
                                 }
                                 _ => Err(LexError {
-                                    offset: self.offset,
+                                    pos: self.cur_pos(),
                                     ty: LexErrorType::Expected('='),
                                     recoverable: Some((
                                         TokenKind::Operator(Operator::IEq),
@@ -657,18 +658,18 @@ impl Lexer {
                                         Some('.') => {
                                             self.next();
                                             Ok(Token::new(
-                                                Span::new(start.into(), self.offset.into()),
+                                                Span::new(start, self.cur_pos()),
                                                 TokenKind::Operator(Operator::FNe),
                                             ))
                                         }
                                         _ => Ok(Token::new(
-                                            Span::new(start.into(), self.offset.into()),
+                                            Span::new(start, self.cur_pos()),
                                             TokenKind::Operator(Operator::INe),
                                         )),
                                     }
                                 }
                                 _ => Err(LexError {
-                                    offset: self.offset,
+                                    pos: self.cur_pos(),
                                     ty: LexErrorType::Expected('='),
                                     recoverable: Some((
                                         TokenKind::Operator(Operator::INe),
@@ -683,18 +684,18 @@ impl Lexer {
                                 Some('=') => {
                                     self.next();
                                     Ok(Token::new(
-                                        Span::new(start.into(), self.offset.into()),
+                                        Span::new(start, self.cur_pos()),
                                         TokenKind::Operator(Operator::UnaryEq),
                                     ))
                                 }
                                 _ => Ok(Token::new(
-                                    Span::new(start.into(), self.offset.into()),
+                                    Span::new(start, self.cur_pos()),
                                     TokenKind::Operator(Operator::GroundEq),
                                 )),
                             }
                         }
                         _ => Ok(Token::new(
-                            Span::new(start.into(), self.offset.into()),
+                            Span::new(start, self.cur_pos()),
                             TokenKind::Operator(Operator::Equal),
                         )),
                     }
@@ -708,26 +709,23 @@ impl Lexer {
                                 Some('=') => {
                                     self.next();
                                     Ok(Token::new(
-                                        Span::new(start.into(), self.offset.into()),
+                                        Span::new(start, self.cur_pos()),
                                         TokenKind::Operator(Operator::UnaryNe),
                                     ))
                                 }
                                 _ => Ok(Token::new(
-                                    Span::new(start.into(), self.offset.into()),
+                                    Span::new(start, self.cur_pos()),
                                     TokenKind::Operator(Operator::GroundNe),
                                 )),
                             }
                         }
-                        _ => Ok(Token::new(
-                            Span::new(start.into(), self.offset.into()),
-                            '\\',
-                        )),
+                        _ => Ok(Token::new(Span::new(start, self.cur_pos()), '\\')),
                     }
                 }
                 _ => {
                     self.next();
                     Err(LexError {
-                        offset: self.offset,
+                        pos: self.cur_pos(),
                         ty: LexErrorType::UnexpectedCharacter(c),
                         recoverable: None,
                     })
@@ -741,8 +739,8 @@ impl Lexer {
         if !bracket_stack.is_empty() {
             for (offset, c) in bracket_stack {
                 errors.push(LexError {
-                    offset,
-                    ty: LexErrorType::UnmatchedBracket(c, 0),
+                    pos: offset,
+                    ty: LexErrorType::UnmatchedBracket(c, Pos::default()),
                     recoverable: None,
                 });
             }
@@ -755,7 +753,7 @@ impl Lexer {
 fn test_lexing_number() {
     macro_rules! test_number {
         ($src:expr, $kind:expr) => {
-            let source = Source::phony($src.to_owned());
+            let source = Source::from_string($src.to_owned());
             let mut lexer = Lexer::new(&source);
             assert_eq!(lexer.consume_number().unwrap().kind, $kind);
         };
@@ -763,19 +761,19 @@ fn test_lexing_number() {
 
     macro_rules! wrong {
         ($src:expr) => {
-            let source = Source::phony($src.to_owned());
+            let source = Source::from_string($src.to_owned());
             let mut lexer = Lexer::new(&source);
             assert!(lexer.consume_number().is_err());
         };
     }
 
     test_number!("0".to_owned(), TokenKind::Int(0));
+    test_number!("0.".to_owned(), TokenKind::Int(0));
     test_number!("0x1234".to_owned(), TokenKind::Int(0x1234));
     test_number!("1234".to_owned(), TokenKind::Int(1234));
     test_number!("1234.5678".to_owned(), TokenKind::Float(1234.5678));
 
     wrong!("0x");
-    wrong!("0.");
 }
 
 #[test]
@@ -786,16 +784,16 @@ fn test_lexing() {
     test @@ 1234 : b,c.
     "#;
 
-    let source = Source::phony(source.to_owned());
+    let source = Source::from_string(source.to_owned());
     let mut lexer = Lexer::new(&source);
     let result = lexer.lex();
     assert_eq!(result.errors.len(), 1);
-    assert_eq!(result.tokens.len(), 21);
+    assert_eq!(result.tokens.len(), 22);
 }
 
 #[test]
 fn test_lexing_operator() {
-    let source = Source::phony("'a' + b *. c =:= d".to_owned());
+    let source = Source::from_string("'a' + b *. c =:= d".to_owned());
     let mut lexer = Lexer::new(&source);
     let result = lexer.lex();
     assert_eq!(result.errors.len(), 0);

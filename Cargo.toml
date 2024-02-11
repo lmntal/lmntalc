@@ -5,7 +5,7 @@ license = "MIT"
 description = "A compiler for the LMNtal language"
 readme = "README.md"
 repository = "https://gitlab.ueda.info.waseda.ac.jp/wang/lmntalc"
-version = "0.10.1"
+version = "0.11.0"
 edition = "2021"
 
 [lib]
@@ -20,7 +20,7 @@ doc = false
 [dependencies]
 ariadne = { version = "0.4", features = ["auto-color"] }
 serde = { version = "1.0", features = ["derive"] }
-clap = { version = "4.4", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"] }
 once_cell = "1.19"
 owo-colors = "4"
 petgraph = { version = "0.6", features = ["serde-1"] }

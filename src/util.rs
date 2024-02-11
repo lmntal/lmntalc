@@ -1,50 +1,79 @@
 use std::{
-    cmp,
+    cmp::{self, Ordering},
     fmt::Display,
-    ops::{Add, Deref, Range, Sub},
-    path::{Path, PathBuf},
+    hash::{Hash, Hasher},
+    ops::{Deref, Range, Sub},
+    path::Path,
 };
 
 use serde::{Deserialize, Serialize};
 
 /// A position in a CodeMap.
-#[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd, Debug, Serialize, Deserialize)]
-pub struct Pos(usize);
+#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize)]
+pub struct Pos {
+    /// The character offset from the beginning of the file.
+    pub offset: u32,
+    /// The line number (0-based)
+    pub line: u32,
+    /// The column number (0-based)
+    pub column: u32,
+}
+
+impl Hash for Pos {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.offset.hash(state);
+    }
+}
+
+impl PartialEq for Pos {
+    fn eq(&self, other: &Self) -> bool {
+        self.offset == other.offset
+    }
+}
+
+impl Eq for Pos {}
+
+impl PartialOrd for Pos {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.offset.cmp(&other.offset))
+    }
+}
+
+impl Ord for Pos {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.offset.cmp(&other.offset)
+    }
+}
 
 impl Pos {
-    pub fn as_usize(&self) -> usize {
-        self.0
+    pub fn new(offset: u32, line: u32, column: u32) -> Self {
+        Self {
+            offset,
+            line,
+            column,
+        }
+    }
+
+    pub fn line_col(&self) -> (u32, u32) {
+        (self.line, self.column)
+    }
+
+    pub fn as_u32(&self) -> u32 {
+        self.offset
     }
 }
 
 impl Display for Pos {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl<T> From<T> for Pos
-where
-    T: Into<usize>,
-{
-    fn from(other: T) -> Self {
-        Self(other.into())
-    }
-}
-
-impl Add<usize> for Pos {
-    type Output = Self;
-
-    fn add(self, rhs: usize) -> Self::Output {
-        Pos(self.0 + rhs)
+        write!(f, "{}:{}:{}", self.offset, self.line, self.column)
     }
 }
 
 impl Sub<Pos> for Pos {
-    type Output = isize;
+    type Output = i32;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        (self.0 as isize) - (rhs.0 as isize)
+        (self.offset as i32) - (rhs.offset as i32)
     }
 }
 
@@ -61,20 +90,6 @@ pub struct Span {
 impl Span {
     pub fn new(low: Pos, high: Pos) -> Self {
         Self { low, high }
-    }
-
-    /// Makes a span from offsets relative to the start of this span.
-    ///
-    /// # Panics
-    ///   * If `end < begin`
-    ///   * If `end` is beyond the length of the span
-    pub fn subspan(&self, begin: usize, end: usize) -> Span {
-        assert!(end >= begin);
-        assert!(self.low + end <= self.high);
-        Span {
-            low: self.low + begin,
-            high: self.low + end,
-        }
     }
 
     /// Checks if a span is contained within this span.
@@ -112,15 +127,23 @@ impl Span {
     /// Create a dummy span that points to the beginning of the file.
     pub const fn dummy() -> Self {
         Self {
-            low: Pos(0),
-            high: Pos(0),
+            low: Pos {
+                offset: 0,
+                line: 0,
+                column: 0,
+            },
+            high: Pos {
+                offset: 0,
+                line: 0,
+                column: 0,
+            },
         }
     }
 }
 
 impl From<Span> for Range<usize> {
     fn from(val: Span) -> Self {
-        val.low.as_usize()..val.high.as_usize()
+        (val.low.as_u32() as usize)..(val.high.as_u32() as usize)
     }
 }
 
@@ -155,8 +178,8 @@ impl<T> Deref for Spanned<T> {
 pub struct Source {
     /// The name of the file
     name: String,
-    /// The path to the file
-    path: PathBuf,
+    /// The uri of the file (e.g. `file:///path/to/file.lmn`)
+    uri: String,
     /// The source code
     source: String,
     /// offset of each line in the source
@@ -169,9 +192,9 @@ impl Source {
     /// The file should exist and be readable by the current user.
     ///
     /// Also, the file should be encoded in UTF-8
-    pub fn new(file: &Path) -> Source {
+    pub fn from_file(file: &Path) -> Source {
         let name = file.file_name().unwrap().to_str().unwrap().to_string();
-        let path = file.to_path_buf();
+        let uri = format!("file://{}", file.to_str().unwrap());
         let source = std::fs::read_to_string(file).unwrap();
         let lines = source
             .lines()
@@ -183,14 +206,14 @@ impl Source {
             .collect();
         Source {
             name,
-            path,
+            uri,
             source,
             lines,
         }
     }
 
     /// Create a new SourceCode from a string
-    pub fn phony(source: String) -> Source {
+    pub fn from_string(source: String) -> Source {
         let lines = source
             .lines()
             .scan(0, |state, line| {
@@ -201,7 +224,7 @@ impl Source {
             .collect();
         Source {
             name: "<phony>".to_string(),
-            path: PathBuf::new(),
+            uri: "phony://".to_string(),
             source,
             lines,
         }
@@ -215,28 +238,24 @@ impl Source {
         &self.name
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
+    pub fn uri(&self) -> &str {
+        &self.uri
     }
 
-    /// Get the line number at a given offset
+    /// Get the line number (0-based) at a given offset
     pub fn line_at_offset(&self, offset: usize) -> usize {
         match self.lines.binary_search(&offset) {
-            Ok(line) => line + 1,
-            Err(line) => line,
+            Ok(line) => line,
+            Err(line) => line - 1,
         }
     }
 
     /// Get the line and column number at a given offset
+    ///
+    /// The line and column numbers are 0-based
     pub fn line_col(&self, offset: usize) -> (usize, usize) {
         let line = self.line_at_offset(offset);
-        let col = offset - self.lines[line - 1] + 1;
+        let col = offset - self.lines[line];
         (line, col)
-    }
-}
-
-impl From<&Path> for Source {
-    fn from(other: &Path) -> Source {
-        Source::new(other)
     }
 }

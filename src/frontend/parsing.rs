@@ -3,16 +3,15 @@ use std::{cell::Cell, fmt::Display};
 use crate::{
     frontend::{
         ast::{ASTNode, AtomName},
-        lexing::{LexError, Lexer},
+        lexing::Lexer,
         token::{Operator, Token, TokenKind},
     },
-    util::{Source, Span},
+    util::{Pos, Source, Span},
 };
 
 /// A parser for LMNtal source code
-#[derive(Debug)]
-pub struct Parser<'lex> {
-    source: &'lex Source,
+#[derive(Debug, Default)]
+pub struct Parser {
     warnings: Vec<ParseWarning>,
     tokens: Vec<Token>,
     pos: Cell<usize>,
@@ -109,19 +108,13 @@ type ParseResult = Result<ASTNode, ParseError>;
 #[derive(Debug)]
 pub struct ParsingResult {
     pub ast: ASTNode,
-    pub lexing_errors: Vec<LexError>,
     pub parsing_errors: Vec<ParseError>,
     pub parsing_warnings: Vec<ParseWarning>,
 }
 
-impl<'lex> Parser<'lex> {
-    pub fn new(source: &'lex Source) -> Parser<'lex> {
-        Parser {
-            source,
-            warnings: Vec::new(),
-            tokens: Vec::new(),
-            pos: Cell::new(0),
-        }
+impl Parser {
+    pub fn new() -> Parser {
+        Self::default()
     }
 
     /// Returns the token at the current position and advances the position by one
@@ -214,10 +207,10 @@ impl<'lex> Parser<'lex> {
     }
 
     /// Start parsing the source code, the lexing is done in the process
-    pub fn parse(&mut self) -> ParsingResult {
-        let mut lexer = Lexer::new(self.source);
-        let result = lexer.lex();
-        self.tokens = result.tokens;
+    pub fn parse(&mut self, tokens: Vec<Token>) -> ParsingResult {
+        self.tokens = tokens;
+        self.pos.set(0);
+        self.warnings.clear();
 
         let mut processes = vec![];
         let mut rules = vec![];
@@ -253,16 +246,15 @@ impl<'lex> Parser<'lex> {
                 name: ("_init".to_owned(), Span::dummy()),
                 process_lists: processes,
                 rules,
-                span: Span::new(0usize.into(), self.source.source().len().into()),
+                span: Span::new(Pos::default(), self.tokens.last().unwrap().span.high()),
             },
-            lexing_errors: result.errors,
             parsing_errors: errors,
             parsing_warnings: self.warnings.clone(),
         }
     }
 }
 
-impl<'lex> Parser<'lex> {
+impl Parser {
     /// Parse a rule or a process list
     ///
     /// Since a rule and a process list both start with an process list, it will be convenient to
@@ -714,8 +706,8 @@ fn infix_binding_power(op: &Operator) -> (u8, u8) {
 /// Initialize the parser with a phony source code and parse the given function, used for testing
 #[allow(dead_code)]
 fn common_init(source: &str, func: fn(&mut Parser) -> ParseResult) -> ParseResult {
-    let source = Source::phony(source.to_owned());
-    let mut parser = Parser::new(&source);
+    let source = Source::from_string(source.to_owned());
+    let mut parser = Parser::new();
     let mut lexer = Lexer::new(&source);
     let result = lexer.lex();
     parser.tokens = result.tokens;
@@ -743,9 +735,11 @@ fn test_parse_relation() {
 
 #[test]
 fn test_compicate_process() {
-    let source = Source::phony("a({X,b,Y + b} * c(e)) :- a({X + b :- k. a + c}).".to_owned());
-    let mut parser = Parser::new(&source);
-    let result = parser.parse();
+    let source = Source::from_string("a({X,b,Y + b} * c(e)) :- a({X + b :- k. a + c}).".to_owned());
+    let mut lexer = Lexer::new(&source);
+    let result = lexer.lex();
+    let mut parser = Parser::new();
+    let result = parser.parse(result.tokens);
     assert!(result.parsing_errors.is_empty());
 }
 
@@ -779,8 +773,10 @@ fn test_parse_rule_or_process_list() {
 
 #[test]
 fn test_parse_world() {
-    let source = Source::phony("a(X,b,Y),c(X,Y). a,b \\ c :- 10.".to_owned());
-    let mut parser = Parser::new(&source);
-    let result = parser.parse();
+    let source = Source::from_string("a(X,b,Y),c(X,Y). a,b \\ c :- 10.".to_owned());
+    let mut lexer = Lexer::new(&source);
+    let result = lexer.lex();
+    let mut parser = Parser::new();
+    let result = parser.parse(result.tokens);
     assert!(result.parsing_errors.is_empty());
 }

@@ -2,8 +2,10 @@ use std::{io, ops::Range};
 
 use crate::{
     analysis::{SemanticAnalysisResult, SemanticError, SemanticWarning},
-    frontend::lexing::{self, LexError, LexErrorType},
-    frontend::parsing::{self, ParseError, ParseWarning, ParsingResult},
+    frontend::{
+        lexing::{self, LexError, LexErrorType, LexingResult},
+        parsing::{self, ParseError, ParseWarning, ParsingResult},
+    },
     util,
 };
 use ariadne::{Color, ColorGenerator, Fmt, Label, Report, Source};
@@ -45,7 +47,7 @@ impl<'src> Reporter<'src> for SemanticAnalysisResult {
             let mut report = Report::build(
                 ariadne::ReportKind::Error,
                 source.name(),
-                e.span().low().as_usize(),
+                e.span().low().as_u32() as usize,
             )
             .with_message(e.message());
             report = report.with_labels(e.labels(source, &mut colors));
@@ -75,6 +77,26 @@ impl<'src> Reporter<'src> for SemanticAnalysisResult {
     }
 }
 
+impl<'src> Reporter<'src> for LexingResult {
+    fn report_errors(&self, source: &'src util::Source) -> io::Result<()> {
+        for e in &self.errors {
+            let mut colors = ColorGenerator::new();
+            let mut report = Report::build(
+                ariadne::ReportKind::Error,
+                source.name(),
+                e.pos.as_u32() as usize,
+            )
+            .with_message(e.message());
+            report = report.with_labels(e.labels(source, &mut colors));
+            report
+                .finish()
+                .eprint((source.name(), Source::from(source.source())))?;
+        }
+
+        Ok(())
+    }
+}
+
 impl<'src> Reporter<'src> for ParsingResult {
     fn report_warnings(&self, source: &'src util::Source) -> io::Result<()> {
         for warn in &self.parsing_warnings {
@@ -82,7 +104,7 @@ impl<'src> Reporter<'src> for ParsingResult {
             let mut report = Report::build(
                 ariadne::ReportKind::Warning,
                 source.name(),
-                warn.span.low().as_usize(),
+                warn.span.low().as_u32() as usize,
             )
             .with_message(warn.message());
             report = report.with_labels(warn.labels(source, &mut colors));
@@ -95,28 +117,12 @@ impl<'src> Reporter<'src> for ParsingResult {
     }
 
     fn report_errors(&self, source: &'src util::Source) -> io::Result<()> {
-        for e in &self.lexing_errors {
-            let mut colors = ColorGenerator::new();
-            let mut report = Report::build(ariadne::ReportKind::Error, source.name(), e.offset)
-                .with_message(e.message());
-            report = report.with_labels(e.labels(source, &mut colors));
-            if let Some(recover) = &e.recoverable {
-                report = report.with_help(format!(
-                    "Did you mean this: {}?",
-                    recover.0.to_string().fg(Color::Blue)
-                ));
-            }
-            report
-                .finish()
-                .eprint((source.name(), Source::from(source.source())))?;
-        }
-
         for e in &self.parsing_errors {
             let mut colors = ColorGenerator::new();
             let mut report = Report::build(
                 ariadne::ReportKind::Error,
                 source.name(),
-                e.span.low().as_usize(),
+                e.span.low().as_u32() as usize,
             )
             .with_message(e.message());
             report = report.with_labels(e.labels(source, &mut colors));
@@ -133,7 +139,7 @@ impl Reportable for LexError {
     fn message(&self) -> String {
         match self.ty {
             lexing::LexErrorType::Expected(c) => {
-                format!("Expected {}", c.to_string().fg(Color::Blue))
+                format!("Expected character '{}'", c.to_string().fg(Color::Blue))
             }
             lexing::LexErrorType::UnexpectedCharacter(c) => {
                 format!("Unexpected {}", c.to_string().fg(Color::Red))
@@ -154,11 +160,21 @@ impl Reportable for LexError {
         colors: &mut ColorGenerator,
     ) -> Vec<Label<(&str, Range<usize>)>> {
         let mut labels = vec![];
-        if let LexErrorType::UnmatchedBracket(_, offset) = self.ty {
-            let label = Label::new((source.name(), offset..offset + 1))
-                .with_message("Did you forget to close the bracket here?".to_string())
-                .with_color(colors.next());
-            labels.push(label);
+        match self.ty {
+            LexErrorType::UnmatchedBracket(_, offset) => {
+                let offset = offset.as_u32() as usize;
+                let label = Label::new((source.name(), offset..offset + 1))
+                    .with_message("Did you forget to close the bracket here?".to_string())
+                    .with_color(colors.next());
+                labels.push(label);
+            }
+            _ => {
+                let offset = self.pos.as_u32() as usize;
+                let label = Label::new((source.name(), offset..offset + 1))
+                    .with_message("At here".to_string())
+                    .with_color(colors.next());
+                labels.push(label);
+            }
         }
         labels
     }
