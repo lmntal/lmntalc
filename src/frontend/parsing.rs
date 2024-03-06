@@ -6,10 +6,11 @@ use crate::{
         lexing::Lexer,
         token::{Operator, Token, TokenKind},
     },
-    util::{Pos, Source, Span},
+    util::{OneOf, Pos, Source, Span},
+    Bundle, RuleContext,
 };
 
-use super::ast::{Atom, Context, Hyperlink, Link, Membrane, Process, ProcessList, Rule};
+use super::ast::{Atom, Hyperlink, Link, Membrane, Process, ProcessContext, ProcessList, Rule};
 
 /// A parser for LMNtal source code
 #[derive(Debug, Default)]
@@ -55,6 +56,7 @@ pub enum IdentifierKind {
     Process,
     Link,
     Context,
+    Bundle,
 }
 
 impl IdentifierKind {
@@ -66,6 +68,7 @@ impl IdentifierKind {
             IdentifierKind::Process => "start with a lowercase letter",
             IdentifierKind::Link => "start with an uppercase letter",
             IdentifierKind::Context => "start with a lowercase letter",
+            IdentifierKind::Bundle => "start with an uppercase letter",
         }
         .to_owned()
     }
@@ -80,6 +83,7 @@ impl Display for IdentifierKind {
             IdentifierKind::Process => write!(f, "process"),
             IdentifierKind::Link => write!(f, "link"),
             IdentifierKind::Context => write!(f, "context"),
+            IdentifierKind::Bundle => write!(f, "bundle"),
         }
     }
 }
@@ -114,6 +118,7 @@ pub struct ParsingResult {
     pub parsing_warnings: Vec<ParseWarning>,
 }
 
+#[allow(dead_code)]
 impl Parser {
     pub fn new() -> Parser {
         Self::default()
@@ -226,8 +231,8 @@ impl Parser {
             let res = self.parse_rule_or_process_list();
             match res {
                 Ok(ast) => match ast {
-                    OneOf::First(rule) => rules.push(rule),
-                    OneOf::Second(process_list) => processes.push(process_list),
+                    OneOf::Left(rule) => rules.push(rule),
+                    OneOf::Right(process_list) => processes.push(process_list),
                 },
                 Err(err) => {
                     errors.push(err);
@@ -249,11 +254,6 @@ impl Parser {
             parsing_warnings: self.warnings.clone(),
         }
     }
-}
-
-enum OneOf<T1, T2> {
-    First(T1),
-    Second(T2),
 }
 
 impl Parser {
@@ -287,7 +287,7 @@ impl Parser {
             if let Some(mut propagation) = propagation {
                 head.processes.append(&mut propagation.processes);
             }
-            return Ok(OneOf::Second(head));
+            return Ok(OneOf::Right(head));
         }
 
         let end = self.pos.get();
@@ -301,7 +301,7 @@ impl Parser {
 
         // if the body is empty
         if self.peek().kind == TokenKind::Dot {
-            return Ok(OneOf::First(Rule {
+            return Ok(OneOf::Left(Rule {
                 name: (name, name_span),
                 head,
                 propagation,
@@ -314,7 +314,7 @@ impl Parser {
         let guard_or_body = self.parse_process_list()?;
         if self.skip(&TokenKind::Vert) {
             if self.peek().kind == TokenKind::Dot {
-                return Ok(OneOf::First(Rule {
+                return Ok(OneOf::Left(Rule {
                     name: (name, name_span),
                     head,
                     propagation,
@@ -324,7 +324,7 @@ impl Parser {
                 }));
             }
             let body = self.parse_process_list()?;
-            Ok(OneOf::First(Rule {
+            Ok(OneOf::Left(Rule {
                 name: (name, name_span),
                 head,
                 propagation,
@@ -333,7 +333,7 @@ impl Parser {
                 span: Span::new(low, self.look_back(1).span.high()),
             }))
         } else {
-            Ok(OneOf::First(Rule {
+            Ok(OneOf::Left(Rule {
                 name: (name, name_span),
                 head,
                 propagation,
@@ -449,7 +449,9 @@ impl Parser {
             Ok(res.into())
         } else if let Ok(res) = self.parse_link() {
             Ok(res.into())
-        } else if let Ok(res) = self.parse_context() {
+        } else if let Ok(res) = self.parse_process_context() {
+            Ok(res.into())
+        } else if let Ok(res) = self.parse_rule_context() {
             Ok(res.into())
         } else {
             Err(ParseError {
@@ -500,10 +502,10 @@ impl Parser {
 
         while let Ok(res) = self.parse_rule_or_process_list() {
             match res {
-                OneOf::First(rule) => {
+                OneOf::Left(rule) => {
                     rules.push(rule);
                 }
-                OneOf::Second(process_list) => {
+                OneOf::Right(process_list) => {
                     processes.push(process_list);
                 }
             }
@@ -577,9 +579,7 @@ impl Parser {
 
             loop {
                 children.push(self.parse_relation()?);
-                if self.skip(&TokenKind::Comma) {
-                    continue;
-                } else {
+                if !self.skip(&TokenKind::Comma) {
                     break;
                 }
             }
@@ -605,7 +605,7 @@ impl Parser {
             });
         }
         self.parse_link().map(|link| Hyperlink {
-            name: link.name,
+            name: (link.name, link.span),
             span: Span::new(start, link.span.high()),
         })
     }
@@ -637,23 +637,147 @@ impl Parser {
         }
     }
 
-    /// Parse a context: $Context
-    fn parse_context(&mut self) -> ParseResult<Context> {
+    /// Parse a process context: $context
+    fn parse_process_context(&mut self) -> ParseResult<ProcessContext> {
+        let start = self.peek().span.low();
+        if !self.skip(&TokenKind::Dollar) {
+            return Err(ParseError {
+                ty: ParseErrorType::UnexpectedToken {
+                    expected: TokenKind::Dollar,
+                    found: self.peek().kind.clone(),
+                },
+                span: self.peek().span,
+            });
+        }
+        let token = self.peek();
+        let name = match &token.kind {
+            TokenKind::Identifier(name) => {
+                // check if the name starts with a non_uppercase letter
+                if name.starts_with(|c: char| c.is_uppercase()) {
+                    return Err(ParseError {
+                        ty: ParseErrorType::WrongCase(IdentifierKind::Context),
+                        span: self.peek().span,
+                    });
+                }
+                self.advance();
+                name.clone()
+            }
+            _ => {
+                return Err(ParseError {
+                    ty: ParseErrorType::UnexpectedToken {
+                        expected: TokenKind::Identifier("context name".to_owned()),
+                        found: self.peek().kind.clone(),
+                    },
+                    span: self.peek().span,
+                });
+            }
+        };
+        let name_span = token.span;
+
+        if !self.skip(&TokenKind::LeftBracket) {
+            return Ok(ProcessContext {
+                name: (name, name_span),
+                args: Vec::new(),
+                bundle: None,
+                span: Span::new(start, name_span.high()),
+            });
+        }
+
+        let mut args = vec![];
+        loop {
+            args.push(self.parse_link()?);
+            if !self.skip(&TokenKind::Comma) {
+                break;
+            }
+        }
+
+        if self.skip(&TokenKind::RightBracket) {
+            return Ok(ProcessContext {
+                name: (name, name_span),
+                args,
+                bundle: None,
+                span: Span::new(start, name_span.high()),
+            });
+        }
+
+        // TODO: Error handling when unclosed
+        if !self.skip(&TokenKind::Vert) {
+            return Err(ParseError {
+                ty: ParseErrorType::UnexpectedToken {
+                    expected: TokenKind::Vert,
+                    found: self.peek().kind.clone(),
+                },
+                span: self.peek().span,
+            });
+        }
+
+        let bundle = self.parse_bundle().map(Some)?;
+        let token = self.expect(&TokenKind::RightBracket)?;
+
+        Ok(ProcessContext {
+            name: (name, name_span),
+            args,
+            bundle,
+            span: Span::new(start, token.span.high()),
+        })
+    }
+
+    /// Parse a process context: @context
+    fn parse_rule_context(&mut self) -> ParseResult<RuleContext> {
         let token = self.peek();
         let start = token.span.low();
-        if let TokenKind::Dollar = token.kind {
-            self.advance();
+        if !self.skip(&TokenKind::At) {
             let token = self.peek();
             if let TokenKind::Identifier(ref ident) = token.kind {
                 if ident.starts_with(|c: char| c.is_lowercase()) {
                     self.advance();
-                    Ok(Context {
-                        name: ident.clone(),
+                    Ok(RuleContext {
+                        name: (ident.clone(), token.span),
                         span: Span::new(start, token.span.high()),
                     })
                 } else {
                     Err(ParseError {
                         ty: ParseErrorType::WrongCase(IdentifierKind::Context),
+                        span: self.peek().span,
+                    })
+                }
+            } else {
+                Err(ParseError {
+                    ty: ParseErrorType::UnexpectedToken {
+                        expected: TokenKind::Identifier("context name".to_owned()),
+                        found: self.peek().kind.clone(),
+                    },
+                    span: self.peek().span,
+                })
+            }
+        } else {
+            Err(ParseError {
+                ty: ParseErrorType::UnexpectedToken {
+                    expected: TokenKind::Dollar,
+                    found: self.peek().kind.clone(),
+                },
+                span: self.peek().span,
+            })
+        }
+    }
+
+    /// Parse a process context: $Context
+    fn parse_bundle(&mut self) -> ParseResult<Bundle> {
+        let token = self.peek();
+        let start = token.span.low();
+        if token.kind == TokenKind::Operator(Operator::IMul) {
+            self.advance();
+            let token = self.peek();
+            if let TokenKind::Identifier(ref ident) = token.kind {
+                if ident.starts_with(|c: char| c.is_uppercase()) {
+                    self.advance();
+                    Ok(Bundle {
+                        name: (ident.clone(), token.span),
+                        span: Span::new(start, token.span.high()),
+                    })
+                } else {
+                    Err(ParseError {
+                        ty: ParseErrorType::WrongCase(IdentifierKind::Bundle),
                         span: self.peek().span,
                     })
                 }
@@ -743,8 +867,10 @@ fn test_parse_membrane() {
 
 #[test]
 fn test_parse_rule() {
-    assert!(common_init("test@@ a(X,b,Y) :- int(A) | c(X,Y)", |p| p
-        .parse_rule_or_process_list())
+    assert!(common_init(
+        "test@@ a(X,b,Y), b{@rule, $p[A, B | *K]} :- int(A) | c(X,Y)",
+        |p| p.parse_rule_or_process_list()
+    )
     .is_ok());
 }
 

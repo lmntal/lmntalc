@@ -299,6 +299,7 @@ impl Rule {
 /// Helper struct for solving rules
 #[derive(Debug, Clone, Copy)]
 struct LinkInfo {
+    #[allow(dead_code)]
     this: RuleLinkArg,
     this_type: Option<ProcessConstraint>,
     opposite: RuleLinkArg,

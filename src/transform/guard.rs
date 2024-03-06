@@ -86,10 +86,10 @@ fn transform_guard_expr(expr: &Process, defined: &HashMap<String, VariableId>) -
             AtomName::Keyword(..) | AtomName::Char(..) => unreachable!(),
         },
         Process::Hyperlink(hyperlink) => {
-            if let Some(id) = defined.get(&hyperlink.name) {
+            if let Some(id) = defined.get(&hyperlink.name.0) {
                 GuardNode::Var(GuardSource::Variable(*id))
             } else {
-                GuardNode::Var(GuardSource::Placeholder(format!("!{}", hyperlink.name)))
+                GuardNode::Var(GuardSource::Placeholder(format!("!{}", hyperlink.name.0)))
             }
         }
         Process::Link(link) => {
@@ -99,7 +99,7 @@ fn transform_guard_expr(expr: &Process, defined: &HashMap<String, VariableId>) -
                 GuardNode::Var(GuardSource::Placeholder(link.name.clone()))
             }
         }
-        Process::Context(_) => {
+        Process::ProcessContext(_) => {
             unimplemented!("context will be implemented in the future")
         }
         _ => {

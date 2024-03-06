@@ -21,6 +21,8 @@ pub enum TokenKind {
     AtAt,
     /// `:-`
     ColonDash,
+    /// `@`
+    At,
     /// `,`
     Comma,
     /// `.`
@@ -125,6 +127,7 @@ impl Display for TokenKind {
             TokenKind::String(s) => write!(f, "\"{}\"", s),
             TokenKind::Operator(o) => write!(f, "{}", o),
             TokenKind::Keyword(k) => write!(f, "{}", k),
+            TokenKind::At => write!(f, "@"),
             TokenKind::AtAt => write!(f, "@@"),
             TokenKind::ColonDash => write!(f, ":-"),
             TokenKind::Comma => write!(f, ","),

@@ -131,6 +131,6 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-fn output(backend: &mut impl Backend, ir_set: &IRSet, arg: &Cli) -> String {
+fn output(backend: &mut impl Backend, ir_set: &IRSet, _arg: &Cli) -> String {
     backend.pretty_print(ir_set)
 }

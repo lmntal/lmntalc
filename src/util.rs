@@ -8,6 +8,12 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum OneOf<T1, T2> {
+    Left(T1),
+    Right(T2),
+}
+
 /// A position in a CodeMap.
 #[derive(Copy, Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Pos {

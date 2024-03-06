@@ -35,6 +35,7 @@ macro_rules! id_with_parent {
             }
 
             impl $name {
+                #[allow(dead_code)]
                 fn new(parent: u32, id: u32) -> Self {
                     let parent = parent as u64;
                     let id = id as u64;
@@ -122,7 +123,6 @@ id_without_parent! {
 pub(super) struct IdGenerator {
     mem_counter: u32,
     atom_counter: HashMap<MembraneId, u32>,
-    rule_counter: HashMap<MembraneId, u32>,
     link_counter: u64,
 }
 
@@ -136,12 +136,6 @@ impl IdGenerator {
         let counter = self.atom_counter.entry(parent).or_insert(0);
         *counter += 1;
         AtomId::new(parent.into(), *counter)
-    }
-
-    pub(super) fn next_rule_id(&mut self, parent: MembraneId) -> RuleId {
-        let counter = self.rule_counter.entry(parent).or_insert(0);
-        *counter += 1;
-        RuleId::new(parent.into(), *counter)
     }
 
     pub(super) fn next_link_id(&mut self) -> u64 {

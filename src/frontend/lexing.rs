@@ -385,19 +385,14 @@ impl<'src> Lexer<'src> {
                 }
                 '@' => {
                     self.next();
-                    match self.peek() {
-                        Some('@') => {
-                            self.next();
-                            Ok(Token::new(
-                                Span::new(start, self.cur_pos()),
-                                TokenKind::AtAt,
-                            ))
-                        }
-                        _ => Err(LexError {
-                            pos: self.cur_pos(),
-                            ty: LexErrorType::Expected('@'),
-                            recoverable: Some((TokenKind::AtAt, tokens.len())),
-                        }),
+                    if let Some('@') = self.peek() {
+                        self.next();
+                        Ok(Token::new(
+                            Span::new(start, self.cur_pos()),
+                            TokenKind::AtAt,
+                        ))
+                    } else {
+                        Ok(Token::new(Span::new(start, self.cur_pos()), TokenKind::At))
                     }
                 }
                 ':' => {

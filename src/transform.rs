@@ -159,7 +159,7 @@ fn visit_process(
         crate::Process::Link { .. } => {
             panic!("Top level link is not allowed")
         }
-        crate::Process::Context { .. } => {
+        crate::Process::ProcessContext { .. } => {
             unimplemented!("context")
         }
         _ => unreachable!("visit_membrane called with non-process node"),
@@ -214,7 +214,7 @@ fn visit_atom(
                 links.push(link);
             }
             crate::Process::Hyperlink(hyperlink) => {
-                let name = format!("!{}", hyperlink.name);
+                let name = format!("!{}", hyperlink.name.0);
                 let hl_id = rule.add_hyperlink(&name);
                 let temp_name = rule.temp_link_name();
 

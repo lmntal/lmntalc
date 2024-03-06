@@ -67,15 +67,33 @@ pub struct Link {
 }
 
 #[derive(Debug)]
-pub struct Hyperlink {
-    pub name: String,
+pub struct ProcessContext {
+    pub name: Spanned<String>,
+    pub args: Vec<Link>,
+    pub bundle: Option<Bundle>,
     pub span: Span,
 }
 
-#[derive(Debug)]
-pub struct Context {
-    pub name: String,
-    pub span: Span,
+macro_rules! simple_ast {
+    (
+        $(
+            $variant:ident,
+        )*
+    ) => {
+        $(
+            #[derive(Debug)]
+            pub struct $variant {
+                pub name: Spanned<String>,
+                pub span: Span,
+            }
+        )*
+    };
+}
+
+simple_ast! {
+    Hyperlink,
+    RuleContext,
+    Bundle,
 }
 
 #[derive(Debug)]
@@ -84,7 +102,8 @@ pub enum Process {
     Membrane(Membrane),
     Link(Link),
     Hyperlink(Hyperlink),
-    Context(Context),
+    ProcessContext(ProcessContext),
+    RuleContext(RuleContext),
 }
 
 macro_rules! impl_process {
@@ -108,7 +127,8 @@ impl_process! {
     Membrane(Membrane),
     Link(Link),
     Hyperlink(Hyperlink),
-    Context(Context),
+    ProcessContext(ProcessContext),
+    RuleContext(RuleContext),
 }
 
 impl Process {
@@ -117,8 +137,9 @@ impl Process {
             Process::Atom(atom) => format!("Atom: {}", atom.name.0),
             Process::Membrane(membrane) => format!("Membrane: {}", membrane.name.0),
             Process::Link(link) => format!("Link: {}", link.name),
-            Process::Hyperlink(hyperlink) => format!("Hyperlink: {}", hyperlink.name),
-            Process::Context(context) => format!("Context: {}", context.name),
+            Process::Hyperlink(hyperlink) => format!("Hyperlink: {}", hyperlink.name.0),
+            Process::ProcessContext(context) => format!("Process Context: {}", context.name.0),
+            Process::RuleContext(context) => format!("Rule Context: {}", context.name.0),
         }
     }
 }

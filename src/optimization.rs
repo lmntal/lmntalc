@@ -4,5 +4,5 @@ use crate::codegen::Emitter;
 pub struct Optimizer;
 
 impl Optimizer {
-    pub fn optimize(&mut self, program: &mut Emitter) {}
+    pub fn optimize(&mut self, _program: &mut Emitter) {}
 }
