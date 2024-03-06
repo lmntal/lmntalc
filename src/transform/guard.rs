@@ -1,84 +1,80 @@
 use std::collections::HashMap;
 
 use crate::{
-    frontend::{
-        ast::{ASTNode, AtomName},
-        token::Operator,
-    },
+    frontend::{ast::AtomName, token::Operator},
     model::{
         guard::{Guard, GuardNode, GuardSource, ProcessConstraint, VariableId, RESERVED_FUNC},
         rule::Rule,
     },
+    Process, ProcessList,
 };
 
-pub(super) fn visit_guard(rule: &mut Rule, process_list: &ASTNode) -> Guard {
+pub(super) fn visit_guard(rule: &mut Rule, process_list: &ProcessList) -> Guard {
     let mut guards = Guard::default();
     let mut defined = HashMap::new();
     let mut id: usize = 0;
-    if let ASTNode::ProcessList { processes, .. } = process_list {
-        for process in processes {
-            if let ASTNode::Atom { name, args, .. } = process {
-                match &name.0 {
-                    // assignment
-                    AtomName::Operator(Operator::Equal) => {
-                        assert!(args.len() == 2);
-                        let lhs = match &args[0] {
-                            ASTNode::Link { name, .. } => name.to_string(),
-                            _ => unreachable!(),
-                        };
-                        let rhs = &args[1];
-                        let node = transform_guard_expr(rhs, &defined);
-                        guards.add_definition(id.into(), &lhs, node);
-                        defined.insert(lhs, id.into());
-                        id += 1;
-                    }
-                    // comparison
-                    AtomName::Operator(op) if op.is_relational() => {
-                        let node = transform_guard_expr(process, &defined);
-                        guards.add_constraint(node);
-                    }
-                    // type constraint
-                    AtomName::Keyword(s) => {
-                        let ty = ProcessConstraint::from(s.as_str());
-                        let mut vars = Vec::new();
-                        for arg in args {
-                            if let ASTNode::Link { name, .. } = arg {
-                                vars.push(GuardSource::Placeholder(name.clone()));
-                            } else {
-                                unimplemented!("type constraint on non-link")
-                            }
-                        }
-                        guards.add_constraint(GuardNode::Constraint(ty, vars));
-                    }
-                    _ => {
-                        panic!("illegal guard in rule {}", rule.name)
-                    }
+    for process in &process_list.processes {
+        if let Process::Atom(atom) = process {
+            match &atom.name.0 {
+                // assignment
+                AtomName::Operator(Operator::Equal) => {
+                    assert!(atom.args.len() == 2);
+                    let lhs = match &atom.args[0] {
+                        Process::Link(link) => link.name.to_string(),
+                        _ => unreachable!(),
+                    };
+                    let rhs = &atom.args[1];
+                    let node = transform_guard_expr(rhs, &defined);
+                    guards.add_definition(id.into(), &lhs, node);
+                    defined.insert(lhs, id.into());
+                    id += 1;
                 }
-            } else {
-                panic!("illegal guard in rule {}", rule.name)
+                // comparison
+                AtomName::Operator(op) if op.is_relational() => {
+                    let node = transform_guard_expr(process, &defined);
+                    guards.add_constraint(node);
+                }
+                // type constraint
+                AtomName::Keyword(s) => {
+                    let ty = ProcessConstraint::from(s.as_str());
+                    let mut vars = Vec::new();
+                    for arg in &atom.args {
+                        if let Process::Link(link) = arg {
+                            vars.push(GuardSource::Placeholder(link.name.clone()));
+                        } else {
+                            unimplemented!("type constraint on non-link")
+                        }
+                    }
+                    guards.add_constraint(GuardNode::Constraint(ty, vars));
+                }
+                _ => {
+                    panic!("illegal guard in rule {}", rule.name)
+                }
             }
+        } else {
+            panic!("illegal guard in rule {}", rule.name)
         }
-    } else {
-        unreachable!("visit_guard called with non-process-list node")
     }
+
     guards
 }
 
-fn transform_guard_expr(expr: &ASTNode, defined: &HashMap<String, VariableId>) -> GuardNode {
+fn transform_guard_expr(expr: &Process, defined: &HashMap<String, VariableId>) -> GuardNode {
     match expr {
-        ASTNode::Atom { name, args, .. } => match &name.0 {
+        Process::Atom(atom) => match &atom.name.0 {
             AtomName::Int(i) => GuardNode::Int(*i),
             AtomName::Float(f) => GuardNode::Float(*f),
             AtomName::Operator(op) => {
-                let lhs = &args[0];
+                let lhs = &atom.args[0];
                 let lhs = transform_guard_expr(lhs, defined);
-                let rhs = &args[1];
+                let rhs = &atom.args[1];
                 let rhs = transform_guard_expr(rhs, defined);
                 GuardNode::Binary(*op, Box::new(lhs), Box::new(rhs))
             }
             AtomName::Plain(name) => {
                 if let Some(func) = RESERVED_FUNC.iter().find(|func| func.name == name) {
-                    let vars = args
+                    let vars = atom
+                        .args
                         .iter()
                         .map(|arg| transform_guard_expr(arg, defined))
                         .collect::<Vec<_>>();
@@ -89,22 +85,21 @@ fn transform_guard_expr(expr: &ASTNode, defined: &HashMap<String, VariableId>) -
             }
             AtomName::Keyword(..) | AtomName::Char(..) => unreachable!(),
         },
-        ASTNode::Link {
-            name, hyperlink, ..
-        } => {
-            if let Some(id) = defined.get(name) {
+        Process::Hyperlink(hyperlink) => {
+            if let Some(id) = defined.get(&hyperlink.name) {
                 GuardNode::Var(GuardSource::Variable(*id))
             } else {
-                // prepend `!` to the name if it's a hyperlink
-                let name = if *hyperlink {
-                    format!("!{}", name)
-                } else {
-                    name.clone()
-                };
-                GuardNode::Var(GuardSource::Placeholder(name))
+                GuardNode::Var(GuardSource::Placeholder(format!("!{}", hyperlink.name)))
             }
         }
-        ASTNode::Context { .. } => {
+        Process::Link(link) => {
+            if let Some(id) = defined.get(&link.name) {
+                GuardNode::Var(GuardSource::Variable(*id))
+            } else {
+                GuardNode::Var(GuardSource::Placeholder(link.name.clone()))
+            }
+        }
+        Process::Context(_) => {
             unimplemented!("context will be implemented in the future")
         }
         _ => {

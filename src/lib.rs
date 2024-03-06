@@ -24,7 +24,7 @@ pub mod transform;
 /// Utilities for the compiler
 pub mod util;
 
-pub use frontend::ast::ASTNode;
+pub use frontend::ast::*;
 pub use frontend::lexing::Lexer as LMNtalLexer;
 pub use frontend::parsing::Parser as LMNtalParser;
 pub use frontend::token::Token;

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{frontend::ast::ASTNode, util::Span};
+use crate::{util::Span, Atom, Membrane, Process, ProcessList};
 
 use super::{SemanticError, SemanticWarning};
 
@@ -12,98 +12,72 @@ pub(super) struct ProcessAnalysisResult {
 }
 
 /// Do semantic analysis on the Membrane ASTNode
-pub(super) fn analyze_membrane(ast: &ASTNode) -> ProcessAnalysisResult {
+pub(super) fn analyze_membrane(ast: &Membrane) -> ProcessAnalysisResult {
     let mut errors = Vec::new();
     let mut free_links = Vec::new();
-    if let ASTNode::Membrane { process_lists, .. } = ast {
-        for process_list in process_lists {
-            let process_errors = analyze_process_list(process_list);
-            errors.extend(process_errors.errors);
-            free_links.extend(process_errors.free_links);
-        }
-    } else {
-        unreachable!();
+    for process_list in &ast.process_lists {
+        let process_errors = analyze_process_list(process_list);
+        errors.extend(process_errors.errors);
+        free_links.extend(process_errors.free_links);
     }
 
     filter_link_occurances(free_links, errors)
 }
 
-pub(super) fn analyze_process_list(ast: &ASTNode) -> ProcessAnalysisResult {
+pub(super) fn analyze_process_list(process_list: &ProcessList) -> ProcessAnalysisResult {
     let mut errors = Vec::new();
     let mut free_links: Vec<(String, Span)> = Vec::new();
-    if let ASTNode::ProcessList { processes, .. } = ast {
-        for process in processes {
-            match process {
-                ASTNode::Membrane { .. } => {
-                    let membrane_errors = analyze_membrane(process);
-                    errors.extend(membrane_errors.errors);
-                    free_links.extend(membrane_errors.free_links);
-                }
-                ASTNode::Atom { .. } => {
-                    let atom_errors = analyze_atom(process);
-                    errors.extend(atom_errors.errors);
-                    free_links.extend(atom_errors.free_links);
-                }
-                ASTNode::Link {
-                    name,
-                    hyperlink,
-                    span,
-                } => {
-                    // append ! to link name if it is a hyperlink
-                    let name = if *hyperlink {
-                        format!("{}!", name)
-                    } else {
-                        name.clone()
-                    };
-                    errors.push(SemanticError::TopLevelLinkOccurrence {
-                        link: name,
-                        span: *span,
-                    });
-                }
-                _ => unreachable!(),
+    for process in &process_list.processes {
+        match process {
+            Process::Membrane(mem) => {
+                let membrane_errors = analyze_membrane(mem);
+                errors.extend(membrane_errors.errors);
+                free_links.extend(membrane_errors.free_links);
             }
+            Process::Atom(atom) => {
+                let atom_errors = analyze_atom(atom);
+                errors.extend(atom_errors.errors);
+                free_links.extend(atom_errors.free_links);
+            }
+            Process::Link(link) => {
+                errors.push(SemanticError::TopLevelLinkOccurrence {
+                    link: link.name.clone(),
+                    span: link.span,
+                });
+            }
+            _ => {}
         }
-    } else {
-        unreachable!()
     }
 
     filter_link_occurances(free_links, errors)
 }
 
-fn analyze_atom(ast: &ASTNode) -> ProcessAnalysisResult {
+fn analyze_atom(atom: &Atom) -> ProcessAnalysisResult {
     let mut errors = Vec::new();
     let mut link_occurences = HashMap::new();
-    if let ASTNode::Atom { args, .. } = ast {
-        for arg in args {
-            match arg {
-                ASTNode::Link {
-                    name,
-                    hyperlink,
-                    span,
-                } => {
-                    if !*hyperlink {
-                        let occurs = link_occurences.entry(name.clone()).or_insert(Vec::new());
-                        occurs.push(*span);
-                    }
-                }
-                ASTNode::Atom { .. } => {
-                    let atom_errors = analyze_atom(arg);
-                    errors.extend(atom_errors.errors);
-                    for free_link in atom_errors.free_links {
-                        let occurs = link_occurences
-                            .entry(free_link.0.clone())
-                            .or_insert(Vec::new());
-                        occurs.push(free_link.1);
-                    }
-                }
-                ASTNode::Membrane { .. } => {
-                    errors.push(SemanticError::MembraneInAtomArgument { span: arg.span() });
-                }
-                _ => unreachable!(),
+    for arg in &atom.args {
+        match arg {
+            Process::Link(link) => {
+                let occurs = link_occurences
+                    .entry(link.name.clone())
+                    .or_insert(Vec::new());
+                occurs.push(link.span);
             }
+            Process::Atom(atom) => {
+                let atom_errors = analyze_atom(atom);
+                errors.extend(atom_errors.errors);
+                for free_link in atom_errors.free_links {
+                    let occurs = link_occurences
+                        .entry(free_link.0.clone())
+                        .or_insert(Vec::new());
+                    occurs.push(free_link.1);
+                }
+            }
+            Process::Membrane(mem) => {
+                errors.push(SemanticError::MembraneInAtomArgument { span: mem.span });
+            }
+            _ => unreachable!(),
         }
-    } else {
-        unreachable!()
     }
 
     for (link, occurences) in &link_occurences {

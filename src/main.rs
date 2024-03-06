@@ -7,10 +7,11 @@ use clap::Parser;
 use lmntalc::{
     analysis::analyze,
     codegen::{Emitter, IRSet},
-    frontend::{ast::tree, lexing, parsing},
+    frontend::{lexing, parsing},
     report::Reporter,
     target::{cpp::CppBackend, java::JavaBackend, python::PythonBackend, Backend, Target},
     transform::transform_lmntal,
+    tree_root,
     util::Source,
 };
 use owo_colors::OwoColorize;
@@ -72,17 +73,17 @@ fn main() -> io::Result<()> {
     let res = parser.parse(lex_res.tokens);
     res.report(&code)?;
 
-    let analysis_res = analyze(&res.ast);
+    let analysis_res = analyze(&res.root);
     analysis_res.report(&code)?;
 
-    let transform_res = transform_lmntal(&res.ast);
+    let transform_res = transform_lmntal(&res.root);
 
     let mut gen = Emitter::new();
     gen.generate(&transform_res.program);
     let ir = gen.ir_set();
 
     if cli.dump_ast {
-        let t = tree(&res.ast, "Root membrane".to_owned());
+        let t = tree_root(&res.root);
         match t {
             Ok(t) => println!("{}\n{}", "AST:".bold().underline(), t),
             Err(e) => println!("{}", e),

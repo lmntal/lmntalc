@@ -2,12 +2,14 @@ use std::{cell::Cell, fmt::Display};
 
 use crate::{
     frontend::{
-        ast::{ASTNode, AtomName},
+        ast::AtomName,
         lexing::Lexer,
         token::{Operator, Token, TokenKind},
     },
     util::{Pos, Source, Span},
 };
+
+use super::ast::{Atom, Context, Hyperlink, Link, Membrane, Process, ProcessList, Rule};
 
 /// A parser for LMNtal source code
 #[derive(Debug, Default)]
@@ -102,12 +104,12 @@ impl Display for ParseErrorType {
     }
 }
 
-type ParseResult = Result<ASTNode, ParseError>;
+type ParseResult<T> = Result<T, ParseError>;
 
 /// The result of parsing, containing the AST and the errors for reporting or recovery
 #[derive(Debug)]
 pub struct ParsingResult {
-    pub ast: ASTNode,
+    pub root: Membrane,
     pub parsing_errors: Vec<ParseError>,
     pub parsing_warnings: Vec<ParseWarning>,
 }
@@ -224,13 +226,8 @@ impl Parser {
             let res = self.parse_rule_or_process_list();
             match res {
                 Ok(ast) => match ast {
-                    ASTNode::Rule { .. } => {
-                        rules.push(ast);
-                    }
-                    ASTNode::ProcessList { .. } => {
-                        processes.push(ast);
-                    }
-                    _ => unreachable!(),
+                    OneOf::First(rule) => rules.push(rule),
+                    OneOf::Second(process_list) => processes.push(process_list),
                 },
                 Err(err) => {
                     errors.push(err);
@@ -242,7 +239,7 @@ impl Parser {
         }
 
         ParsingResult {
-            ast: ASTNode::Membrane {
+            root: Membrane {
                 name: ("_init".to_owned(), Span::dummy()),
                 process_lists: processes,
                 rules,
@@ -254,12 +251,17 @@ impl Parser {
     }
 }
 
+enum OneOf<T1, T2> {
+    First(T1),
+    Second(T2),
+}
+
 impl Parser {
     /// Parse a rule or a process list
     ///
     /// Since a rule and a process list both start with an process list, it will be convenient to
     /// distinguish them by checking if the next token is a colon dash
-    fn parse_rule_or_process_list(&mut self) -> ParseResult {
+    fn parse_rule_or_process_list(&mut self) -> ParseResult<OneOf<Rule, ProcessList>> {
         let mut name = String::new();
         let mut name_span = Span::dummy();
         if self.look_ahead(0).kind == TokenKind::Identifier("".to_owned())
@@ -276,34 +278,16 @@ impl Parser {
         let mut propagation = None;
 
         if self.skip(&TokenKind::Backslash) {
-            propagation = Some(Box::new(head));
+            propagation = Some(head);
             head = self.parse_process_list()?;
         }
 
         if !self.skip(&TokenKind::ColonDash) {
             // ignore the backslash if it is not followed by a colon dash
-            if let Some(propagation) = propagation {
-                match (head, *propagation) {
-                    (
-                        ASTNode::ProcessList {
-                            processes: mut p1,
-                            span: span1,
-                        },
-                        ASTNode::ProcessList {
-                            processes: mut p2,
-                            span: span2,
-                        },
-                    ) => {
-                        p1.append(&mut p2);
-                        return Ok(ASTNode::ProcessList {
-                            processes: p1,
-                            span: span1.merge(span2),
-                        });
-                    }
-                    _ => unreachable!(),
-                }
+            if let Some(mut propagation) = propagation {
+                head.processes.append(&mut propagation.processes);
             }
-            return Ok(head);
+            return Ok(OneOf::Second(head));
         }
 
         let end = self.pos.get();
@@ -317,51 +301,51 @@ impl Parser {
 
         // if the body is empty
         if self.peek().kind == TokenKind::Dot {
-            return Ok(ASTNode::Rule {
+            return Ok(OneOf::First(Rule {
                 name: (name, name_span),
-                head: Box::new(head),
+                head,
                 propagation,
                 guard: None,
                 body: None,
                 span: Span::new(low, self.look_back(1).span.high()),
-            });
+            }));
         }
 
         let guard_or_body = self.parse_process_list()?;
         if self.skip(&TokenKind::Vert) {
             if self.peek().kind == TokenKind::Dot {
-                return Ok(ASTNode::Rule {
+                return Ok(OneOf::First(Rule {
                     name: (name, name_span),
-                    head: Box::new(head),
+                    head,
                     propagation,
-                    guard: Some(Box::new(guard_or_body)),
+                    guard: Some(guard_or_body),
                     body: None,
                     span: Span::new(low, self.look_back(1).span.high()),
-                });
+                }));
             }
             let body = self.parse_process_list()?;
-            Ok(ASTNode::Rule {
+            Ok(OneOf::First(Rule {
                 name: (name, name_span),
-                head: Box::new(head),
+                head,
                 propagation,
-                guard: Some(Box::new(guard_or_body)),
-                body: Some(Box::new(body)),
+                guard: Some(guard_or_body),
+                body: Some(body),
                 span: Span::new(low, self.look_back(1).span.high()),
-            })
+            }))
         } else {
-            Ok(ASTNode::Rule {
+            Ok(OneOf::First(Rule {
                 name: (name, name_span),
-                head: Box::new(head),
+                head,
                 propagation,
                 guard: None,
-                body: Some(Box::new(guard_or_body)),
+                body: Some(guard_or_body),
                 span: Span::new(low, self.look_back(1).span.high()),
-            })
+            }))
         }
     }
 
     /// Parse a process list
-    fn parse_process_list(&mut self) -> ParseResult {
+    fn parse_process_list(&mut self) -> ParseResult<ProcessList> {
         let mut processes = vec![];
         let low = self.peek().span.low();
         let mut warnings = vec![];
@@ -386,13 +370,13 @@ impl Parser {
 
         // commit the warnings
         self.warnings.extend(warnings);
-        Ok(ASTNode::ProcessList {
+        Ok(ProcessList {
             processes,
             span: Span::new(low, self.look_back(1).span.high()),
         })
     }
 
-    fn parse_relation(&mut self) -> ParseResult {
+    fn parse_relation(&mut self) -> ParseResult<Process> {
         let lhs = self.parse_expr(0)?;
         if self.peek().kind.is_relational() {
             let op = self.peek().kind.operator().unwrap();
@@ -400,28 +384,28 @@ impl Parser {
             let span = self.peek().span;
             self.advance();
             let rhs = self.parse_expr(0)?;
-            Ok(ASTNode::Atom {
+            Ok(Process::Atom(Atom {
                 name: (op.into(), op_span),
                 args: vec![lhs, rhs],
                 span,
-            })
+            }))
         } else {
             Ok(lhs)
         }
     }
 
     /// Parse an expression, using Pratt's algorithm
-    fn parse_expr(&mut self, min_bp: u8) -> ParseResult {
+    fn parse_expr(&mut self, min_bp: u8) -> ParseResult<Process> {
         let op = self.peek().kind.clone();
         let span = self.peek().span;
         let mut lhs = match op {
             TokenKind::Operator(op) if op == Operator::IAdd || op == Operator::ISub => {
                 let rhs = self.parse_expr(prefix_binding_power(&op))?;
-                ASTNode::Atom {
+                Process::Atom(Atom {
                     name: (op.into(), span),
                     args: vec![rhs],
                     span,
-                }
+                })
             }
             TokenKind::LeftParen => {
                 self.advance();
@@ -445,26 +429,28 @@ impl Parser {
             }
             self.advance();
             let rhs = self.parse_expr(right_bp)?;
-            lhs = ASTNode::Atom {
+            lhs = Process::Atom(Atom {
                 name: (op.into(), span),
                 args: vec![lhs, rhs],
                 span,
-            }
+            })
         }
 
         Ok(lhs)
     }
 
     /// Parse a process, which can be a membrane, an atom, a link or a context
-    fn parse_process(&mut self) -> ParseResult {
+    fn parse_process(&mut self) -> ParseResult<Process> {
         if let Ok(res) = self.parse_membrane() {
-            Ok(res)
+            Ok(res.into())
         } else if let Ok(res) = self.parse_atom() {
-            Ok(res)
+            Ok(res.into())
+        } else if let Ok(res) = self.parse_hyperlink() {
+            Ok(res.into())
         } else if let Ok(res) = self.parse_link() {
-            Ok(res)
+            Ok(res.into())
         } else if let Ok(res) = self.parse_context() {
-            Ok(res)
+            Ok(res.into())
         } else {
             Err(ParseError {
                 ty: ParseErrorType::UnexpectedToken {
@@ -477,7 +463,7 @@ impl Parser {
     }
 
     /// Parse a membrane: {a(X,b,Y),c(X,Y). a,b,c :- e}
-    fn parse_membrane(&mut self) -> ParseResult {
+    fn parse_membrane(&mut self) -> ParseResult<Membrane> {
         let token = self.peek();
         let mut m_name = String::new();
         let mut m_span = Span::dummy();
@@ -514,24 +500,22 @@ impl Parser {
 
         while let Ok(res) = self.parse_rule_or_process_list() {
             match res {
-                ASTNode::Rule { .. } => {
-                    rules.push(res);
+                OneOf::First(rule) => {
+                    rules.push(rule);
                 }
-                ASTNode::ProcessList { .. } => {
-                    processes.push(res);
+                OneOf::Second(process_list) => {
+                    processes.push(process_list);
                 }
-                _ => unreachable!(),
             }
             if self.skip(&TokenKind::Dot) {
                 continue;
-            } else {
-                break;
             }
+            break;
         }
 
         let token = self.expect(&TokenKind::RightBrace)?;
 
-        Ok(ASTNode::Membrane {
+        Ok(Membrane {
             name: (m_name, m_span),
             rules,
             process_lists: processes,
@@ -540,7 +524,7 @@ impl Parser {
     }
 
     /// Parse an atom: a(X,b,Y)
-    fn parse_atom(&mut self) -> ParseResult {
+    fn parse_atom(&mut self) -> ParseResult<Atom> {
         let token = self.peek();
         let span = token.span;
         let name = match &token.kind {
@@ -583,7 +567,7 @@ impl Parser {
         };
 
         if !self.skip(&TokenKind::LeftParen) {
-            Ok(ASTNode::Atom {
+            Ok(Atom {
                 name: (name, span),
                 args: Vec::new(),
                 span,
@@ -601,7 +585,7 @@ impl Parser {
             }
 
             let token = self.expect(&TokenKind::RightParen)?;
-            Ok(ASTNode::Atom {
+            Ok(Atom {
                 name: (name, span),
                 args: children,
                 span: span.merge(token.span),
@@ -609,22 +593,31 @@ impl Parser {
         }
     }
 
-    fn parse_link(&mut self) -> ParseResult {
+    fn parse_hyperlink(&mut self) -> ParseResult<Hyperlink> {
         let start = self.peek().span.low();
-        let hyperlink = if self.peek().kind == TokenKind::Bang {
-            self.advance();
-            true
-        } else {
-            false
-        };
+        if !self.skip(&TokenKind::Bang) {
+            return Err(ParseError {
+                ty: ParseErrorType::UnexpectedToken {
+                    expected: TokenKind::Bang,
+                    found: self.peek().kind.clone(),
+                },
+                span: self.peek().span,
+            });
+        }
+        self.parse_link().map(|link| Hyperlink {
+            name: link.name,
+            span: Span::new(start, link.span.high()),
+        })
+    }
+
+    fn parse_link(&mut self) -> ParseResult<Link> {
+        let start = self.peek().span.low();
         let token = self.peek();
-        // parse link
         if let TokenKind::Identifier(ref ident) = token.kind {
             if ident.starts_with(|c: char| c.is_uppercase()) {
                 self.advance();
-                Ok(ASTNode::Link {
+                Ok(Link {
                     name: ident.clone(),
-                    hyperlink,
                     span: Span::new(start, token.span.high()),
                 })
             } else {
@@ -645,7 +638,7 @@ impl Parser {
     }
 
     /// Parse a context: $Context
-    fn parse_context(&mut self) -> ParseResult {
+    fn parse_context(&mut self) -> ParseResult<Context> {
         let token = self.peek();
         let start = token.span.low();
         if let TokenKind::Dollar = token.kind {
@@ -654,7 +647,7 @@ impl Parser {
             if let TokenKind::Identifier(ref ident) = token.kind {
                 if ident.starts_with(|c: char| c.is_lowercase()) {
                     self.advance();
-                    Ok(ASTNode::Context {
+                    Ok(Context {
                         name: ident.clone(),
                         span: Span::new(start, token.span.high()),
                     })
@@ -705,7 +698,7 @@ fn infix_binding_power(op: &Operator) -> (u8, u8) {
 
 /// Initialize the parser with a phony source code and parse the given function, used for testing
 #[allow(dead_code)]
-fn common_init(source: &str, func: fn(&mut Parser) -> ParseResult) -> ParseResult {
+fn common_init<T>(source: &str, func: fn(&mut Parser) -> ParseResult<T>) -> ParseResult<T> {
     let source = Source::from_string(source.to_owned());
     let mut parser = Parser::new();
     let mut lexer = Lexer::new(&source);

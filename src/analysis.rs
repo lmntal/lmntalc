@@ -1,6 +1,6 @@
 pub mod process;
 
-use crate::{frontend::ast::ASTNode, util::Span};
+use crate::{util::Span, Membrane};
 
 use self::process::analyze_membrane;
 
@@ -37,19 +37,15 @@ pub struct SemanticAnalysisResult {
 }
 
 /// Do semantic analysis on the Membrane ASTNode
-pub fn analyze(ast: &ASTNode) -> SemanticAnalysisResult {
-    if let ASTNode::Membrane { process_lists, .. } = ast {
-        if process_lists.is_empty() {
-            return SemanticAnalysisResult {
-                warnings: vec![SemanticWarning::NoInitialProcess],
-                errors: vec![],
-            };
-        }
-    } else {
-        unreachable!();
+pub fn analyze(root: &Membrane) -> SemanticAnalysisResult {
+    if root.process_lists.is_empty() {
+        return SemanticAnalysisResult {
+            warnings: vec![SemanticWarning::NoInitialProcess],
+            errors: vec![],
+        };
     }
 
-    let res = analyze_membrane(ast);
+    let res = analyze_membrane(root);
     let mut errors = res.errors;
 
     for (link, span) in res.free_links {
