@@ -241,3 +241,4 @@ def equals(*atoms: Atom) -> bool:
 
 def dump_atoms():
     print(atom_list.dump())
+
