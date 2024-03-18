@@ -18,12 +18,38 @@ cd lmntalc
 cargo install --path .
 ```
 
+## Usage
+
+```sh
+lmntalc <input-file>
+```
+
+or
+
+```sh
+lmntalc -t <target-language> <input-file>
+```
+
+Then, the compiled code will be written to the file with the same name as the input file, but with the extension of the target language.
+To specify the output file, use `-o` option.
+
+```sh
+lmntalc -t <target-language> -o <output-file> <input-file>
+```
+
+For more information, use `lmntalc --help`.
+
 ## Features
 
 - Full support of parsing HyperLMNtal.
 - Simple static analysis on parse tree level.
 - Support of compiling Flat HyperLMNtal to target languages.
-  - Currently, C++, Java, and Python are supported.
+
+### Target Languages
+
+- C++ 20
+- Java 17
+- Python 3.11
 
 ## Behavioral Difference from [lmntal-compiler](https://github.com/lmntal/lmntal-compiler)
 
