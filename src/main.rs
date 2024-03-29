@@ -66,8 +66,8 @@ fn main() -> io::Result<()> {
     }
 
     let code = Source::from_file(&cli.source);
-    let mut lexer = lexing::Lexer::new(&code);
-    let mut parser = parsing::Parser::new();
+    let lexer = lexing::Lexer::new(&code);
+    let parser = parsing::Parser::new();
     let lex_res = lexer.lex();
     lex_res.report(&code)?;
     let res = parser.parse(lex_res.tokens);

@@ -162,6 +162,7 @@ impl From<Operator> for ProcessConstraint {
             | Operator::IMul
             | Operator::IDiv
             | Operator::IMod
+            | Operator::IPow
             | Operator::IEq
             | Operator::INe
             | Operator::ILt
@@ -185,7 +186,14 @@ impl From<Operator> for ProcessConstraint {
 
             Operator::HyperlinkFuse | Operator::HyperlinkUnify => ProcessConstraint::Hyperlink,
 
-            Operator::Equal => unreachable!(),
+            Operator::Question | Operator::DoubleColon | Operator::Equal => unreachable!(),
+            Operator::Negative => ProcessConstraint::Int,
+            Operator::LogicalAnd
+            | Operator::LogicalOr
+            | Operator::LogicalNot
+            | Operator::LogicalXor
+            | Operator::ArithmeticShift
+            | Operator::LogicalShift => ProcessConstraint::Int,
         }
     }
 }

@@ -4,7 +4,7 @@ use crate::{
     analysis::{SemanticAnalysisResult, SemanticError, SemanticWarning},
     frontend::{
         lexing::{self, LexError, LexErrorType, LexingResult},
-        parsing::{self, ParseError, ParseWarning, ParsingResult},
+        parsing::{self, ParseError, ParseErrorType, ParseWarning, ParsingResult},
     },
     util,
 };
@@ -193,17 +193,15 @@ impl Reportable for ParseError {
 
     fn message(&self) -> String {
         match &self.ty {
-            parsing::ParseErrorType::UnexpectedToken { expected, found } => {
+            ParseErrorType::UnexpectedToken { expected, found } => {
                 format!(
                     "Expected {}, but found {}",
                     expected.to_string().fg(Color::Blue),
                     found.to_string().fg(Color::Red)
                 )
             }
-            parsing::ParseErrorType::UnexpectedEOF => "Unexpected end of file".to_string(),
-            parsing::ParseErrorType::WrongCase(ty) => {
-                format!("The identifier should {}.", ty.should().fg(Color::Blue))
-            }
+            ParseErrorType::UnexpectedEOF => "Unexpected end of file".to_string(),
+            ParseErrorType::ExpectAnItem => "Expect an item".to_string(),
         }
     }
 }
@@ -223,6 +221,9 @@ impl Reportable for ParseWarning {
         match &self.ty {
             parsing::ParseWarningType::MissingCommaBetweenProcesses => {
                 "Missing comma between processes".to_string()
+            }
+            parsing::ParseWarningType::MissingPeriodAtTheEnd => {
+                "Missing period at the end of the process".to_string()
             }
         }
     }

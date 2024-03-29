@@ -1,5 +1,5 @@
 use crate::{
-    frontend::token::{Operator, Token, TokenKind, KEYWORD},
+    frontend::token::{Operator, Token, TokenKind},
     util::{Pos, Source, Span},
 };
 
@@ -9,6 +9,7 @@ pub struct Lexer<'src> {
     chars: Vec<char>,
     src: &'src Source,
     offset: usize,
+    warnings: Vec<LexWarning>,
 }
 
 #[derive(Clone, Debug)]
@@ -31,9 +32,21 @@ pub struct LexError {
     pub recoverable: Option<(TokenKind, usize)>,
 }
 
+#[derive(Clone, Debug)]
+pub enum LexWarningType {
+    StringInsideCharLiteral,
+}
+
+#[derive(Clone, Debug)]
+pub struct LexWarning {
+    pub pos: Pos,
+    pub ty: LexWarningType,
+}
+
 #[derive(Debug, Clone)]
 pub struct LexingResult {
     pub tokens: Vec<Token>,
+    pub warnings: Vec<LexWarning>,
     pub errors: Vec<LexError>,
 }
 
@@ -93,6 +106,7 @@ impl<'src> Lexer<'src> {
             src,
             chars: src.source().chars().collect(),
             offset: 0,
+            warnings: Vec::new(),
         }
     }
 
@@ -119,13 +133,33 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    fn skip<F>(&mut self, f: F) -> bool
+    where
+        F: Fn(char) -> bool,
+    {
+        if let Some(c) = self.peek() {
+            if f(c) {
+                self.advance(1);
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }
+
+    fn advance(&mut self, n: usize) {
+        self.offset += n;
+    }
+
     fn rewind(&mut self, n: usize) {
         self.offset -= n;
     }
 
-    fn take_while<F>(&mut self, mut f: F) -> String
+    fn take_while<F>(&mut self, f: F) -> String
     where
-        F: FnMut(char) -> bool,
+        F: Fn(char) -> bool,
     {
         let mut s = String::new();
         while let Some(c) = self.peek() {
@@ -135,6 +169,55 @@ impl<'src> Lexer<'src> {
             s.push(self.next().unwrap());
         }
         s
+    }
+
+    fn slice(&self, span: Span) -> &str {
+        &self.src.source()[span.low().offset as usize..span.high().offset as usize]
+    }
+
+    fn sequence(&mut self, s: &[char]) -> bool {
+        let rollback = self.offset;
+        for c in s {
+            if self.next() != Some(*c) {
+                self.offset = rollback;
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Consume a quoted string, return the span of the content (without quotes).
+    fn quoted(&mut self, left: &str, right: &str) -> Option<Span> {
+        let left = left.chars().collect::<Vec<_>>();
+        let right = right.chars().collect::<Vec<_>>();
+        let rollback = self.offset;
+        if !self.sequence(&left) {
+            return None;
+        }
+        let start = self.cur_pos();
+        let mut escape_flag = false;
+        while let Some(c) = self.next() {
+            if c == '\n' {
+                // newline is not allowed in a quoted string
+                // TODO: report an error
+                break;
+            }
+            if escape_flag {
+                escape_flag = false;
+                continue;
+            }
+            if c == '\\' {
+                escape_flag = true;
+                continue;
+            }
+            // sequence(1) will consume the right quote so we need to get the current position before it
+            let end = self.cur_pos();
+            if self.sequence(&right) {
+                return Some(Span::new(start, end));
+            }
+        }
+        self.offset = rollback;
+        None
     }
 }
 
@@ -149,10 +232,10 @@ impl<'src> Lexer<'src> {
         let start = self.cur_pos();
         match self.peek() {
             Some('0') => {
-                self.next();
+                self.advance(1);
                 match self.peek() {
                     Some('x') => {
-                        self.next();
+                        self.advance(1);
                         let s = self.take_while(|c| c.is_ascii_hexdigit());
                         if s.is_empty() {
                             return Err(LexError {
@@ -164,15 +247,55 @@ impl<'src> Lexer<'src> {
                         let end = self.cur_pos();
                         let span = Span::new(start, end);
 
-                        Ok(Token::new(span, i64::from_str_radix(&s, 16).unwrap()))
+                        Ok(Token::new(
+                            span,
+                            TokenKind::new_number(i64::from_str_radix(&s, 16).unwrap(), 16),
+                        ))
+                    }
+                    Some('b') => {
+                        self.advance(1);
+                        let s = self.take_while(|c| c == '0' || c == '1');
+                        if s.is_empty() {
+                            return Err(LexError {
+                                pos: self.cur_pos(),
+                                ty: LexErrorType::UncompleteNumber,
+                                recoverable: None,
+                            });
+                        }
+                        let end = self.cur_pos();
+                        let span = Span::new(start, end);
+                        Ok(Token::new(
+                            span,
+                            TokenKind::new_number(i64::from_str_radix(&s, 2).unwrap(), 2),
+                        ))
+                    }
+                    Some('o') => {
+                        self.advance(1);
+                        let s = self.take_while(|c| c.is_ascii_digit() && c != '8' && c != '9');
+                        if s.is_empty() {
+                            return Err(LexError {
+                                pos: self.cur_pos(),
+                                ty: LexErrorType::UncompleteNumber,
+                                recoverable: None,
+                            });
+                        }
+                        let end = self.cur_pos();
+                        let span = Span::new(start, end);
+                        Ok(Token::new(
+                            span,
+                            TokenKind::new_number(i64::from_str_radix(&s, 8).unwrap(), 8),
+                        ))
                     }
                     Some('.') => {
-                        self.next();
+                        self.advance(1);
                         let frac = self.take_while(|c| c.is_ascii_digit());
                         if frac.is_empty() {
                             // the dot may be end of a process list
                             self.rewind(1); // rewind the dot
-                            return Ok(Token::new(Span::new(start, self.cur_pos()), 0));
+                            return Ok(Token::new(
+                                Span::new(start, self.cur_pos()),
+                                TokenKind::new_number(0, 10),
+                            ));
                         }
                         let end = self.cur_pos();
                         let span = Span::new(start, end);
@@ -191,12 +314,33 @@ impl<'src> Lexer<'src> {
                         }
                         let s = self.take_while(|c| c.is_ascii_digit());
                         if s.is_empty() {
-                            return Ok(Token::new(Span::new(start, self.cur_pos()), 0));
+                            return Ok(Token::new(
+                                Span::new(start, self.cur_pos()),
+                                TokenKind::new_number(0, 10),
+                            ));
                         }
                         let end = self.cur_pos();
                         let span = Span::new(start, end);
-                        Ok(Token::new(span, s.parse::<i64>().unwrap()))
+                        Ok(Token::new(
+                            span,
+                            TokenKind::new_number(s.parse::<i64>().unwrap(), 10),
+                        ))
                     }
+                }
+            }
+            Some('.') => {
+                self.advance(1);
+                let frac = self.take_while(|c| c.is_ascii_digit());
+                if frac.is_empty() {
+                    Ok(Token::new(
+                        Span::new(start, self.cur_pos()),
+                        TokenKind::Period,
+                    ))
+                } else {
+                    let end = self.cur_pos();
+                    let span = Span::new(start, end);
+                    let s = format!("0.{}", frac);
+                    Ok(Token::new(span, s.parse::<f64>().unwrap()))
                 }
             }
             _ => {
@@ -209,7 +353,7 @@ impl<'src> Lexer<'src> {
                     });
                 }
                 if self.peek() == Some('.') {
-                    self.next();
+                    self.advance(1);
                     let frac = self.take_while(|c| c.is_ascii_digit());
                     let end = self.cur_pos();
                     let span = Span::new(start, end);
@@ -217,7 +361,10 @@ impl<'src> Lexer<'src> {
                         self.rewind(1);
                         let end = self.cur_pos();
                         let span = Span::new(start, end);
-                        Ok(Token::new(span, s.parse::<i64>().unwrap()))
+                        Ok(Token::new(
+                            span,
+                            TokenKind::new_number(s.parse::<i64>().unwrap(), 10),
+                        ))
                     } else {
                         let s = format!("{}.{}", s, frac);
                         Ok(Token::new(span, s.parse::<f64>().unwrap()))
@@ -225,45 +372,107 @@ impl<'src> Lexer<'src> {
                 } else {
                     let end = self.cur_pos();
                     let span = Span::new(start, end);
-                    Ok(Token::new(span, s.parse::<i64>().unwrap()))
+                    Ok(Token::new(
+                        span,
+                        TokenKind::new_number(s.parse::<i64>().unwrap(), 10),
+                    ))
                 }
             }
         }
     }
 
-    fn consume_ident(&mut self) -> LexResult {
+    fn consume_atom_name(&mut self) -> LexResult {
+        let start = self.cur_pos();
+        let s = self.take_while(|c| c.is_ascii_alphanumeric() || c == '_');
+        let mut path = vec![s.clone()];
+        while self.skip(|c| c == '.') {
+            let next = self.take_while(|c| c.is_ascii_alphanumeric() || c == '_');
+            if next.is_empty() {
+                self.rewind(1);
+                break;
+            }
+            path.push(next);
+        }
+        if path.len() > 1 {
+            let end = self.cur_pos();
+            let span = Span::new(start, end);
+            Ok(Token::new(span, TokenKind::PathedAtomName(path)))
+        } else if let Some(op) = Operator::parse(&s) {
+            let end = self.cur_pos();
+            let span = Span::new(start, end);
+            Ok(Token::new(span, TokenKind::Operator(op)))
+        } else {
+            let end = self.cur_pos();
+            let span = Span::new(start, end);
+            Ok(Token::new(span, TokenKind::AtomName(s)))
+        }
+    }
+
+    fn consume_link_name(&mut self) -> LexResult {
         let start = self.cur_pos();
         let s = self.take_while(|c| c.is_ascii_alphanumeric() || c == '_');
         let end = self.cur_pos();
         let span = Span::new(start, end);
-        if KEYWORD.contains(&s.as_str()) {
-            Ok(Token::new(span, TokenKind::Keyword(s)))
-        } else {
-            Ok(Token::new(span, TokenKind::Identifier(s)))
-        }
+        Ok(Token::new(span, TokenKind::LinkName(s)))
     }
 
-    fn consume_char(&mut self) -> LexResult {
-        self.next();
+    /// Consume a symbol name, e.g. `'abc'` or `'ab''cd'`.
+    fn consume_symbol_name(&mut self) -> LexResult {
         let start = self.cur_pos();
-        match self.next() {
-            Some(c) => {
-                if self.next() != Some('\'') {
-                    return Err(LexError {
-                        pos: self.cur_pos(),
-                        ty: LexErrorType::UnclosedQuote,
-                        recoverable: None,
-                    });
-                }
-                let end = self.cur_pos();
-                let span = Span::new(start, end);
-                Ok(Token::new(span, TokenKind::Char(c)))
+        let mut end = start;
+        let mut inner_start = start;
+        let mut inner_end = start;
+
+        while let Some(span) = self.quoted("'", "'") {
+            if end == start {
+                inner_start = span.low(); // update the inner start position if it's the first time
             }
-            None => Err(LexError {
+            end = self.cur_pos(); // extend the end position
+            inner_end = span.high(); // update the inner end position
+        }
+
+        if end == start {
+            return Err(LexError {
                 pos: self.cur_pos(),
                 ty: LexErrorType::UnclosedQuote,
                 recoverable: None,
-            }),
+            });
+        }
+
+        let span = Span::new(start, end);
+        let content = Span::new(inner_start, inner_end);
+        Ok(Token::new(
+            span,
+            TokenKind::SymbolName(self.slice(content).to_owned()),
+        ))
+    }
+
+    /// Consume a character literal, e.g. `#'a'`.
+    ///
+    /// If there is more than one character, it will be an error.
+    fn consume_char(&mut self) -> LexResult {
+        // skip the sharp sign
+        let start = self.cur_pos();
+        self.advance(1);
+        if let Some(span) = self.quoted("\"", "\"") {
+            let end = self.cur_pos();
+            let whole_span = Span::new(start, end);
+            let s = self.slice(span);
+            if let Some(c) = is_char(s) {
+                Ok(Token::new(whole_span, TokenKind::Char(c)))
+            } else {
+                Err(LexError {
+                    pos: self.cur_pos(),
+                    ty: LexErrorType::UnexpectedCharacter(s.chars().next().unwrap()),
+                    recoverable: None,
+                })
+            }
+        } else {
+            Err(LexError {
+                pos: self.cur_pos(),
+                ty: LexErrorType::UnclosedQuote,
+                recoverable: None,
+            })
         }
     }
 
@@ -271,7 +480,7 @@ impl<'src> Lexer<'src> {
         let start = self.cur_pos();
         let mut s = String::new();
         let mut terminated = false;
-        self.next();
+        self.advance(1);
         while let Some(c) = self.next() {
             match c {
                 '"' => {
@@ -305,38 +514,57 @@ impl<'src> Lexer<'src> {
 }
 
 impl<'src> Lexer<'src> {
-    pub fn lex(&mut self) -> LexingResult {
+    pub fn lex(mut self) -> LexingResult {
         let mut tokens = Vec::new();
         let mut errors = Vec::new();
         let mut bracket_stack = Vec::new();
         while let Some(c) = self.peek() {
             let start = self.cur_pos();
             let kind = match c {
-                '0'..='9' => self.consume_number(),
-                'a'..='z' | 'A'..='Z' | '_' => self.consume_ident(),
+                '0'..='9' | '.' => self.consume_number(),
+                'a'..='z' => self.consume_atom_name(),
+                'A'..='Z' | '_' => self.consume_link_name(),
+                '#' => self.consume_char(),
                 '"' => self.consume_string(),
-                '\'' => self.consume_char(),
-                ',' | '.' | '|' | '!' | '$' => {
-                    self.next();
+                '\'' => self.consume_symbol_name(),
+                ',' | '|' | '!' | '$' | '~' => {
+                    self.advance(1);
                     Ok(Token::new(Span::new(start, self.cur_pos()), c))
                 }
                 '(' => {
-                    self.next();
+                    self.advance(1);
                     bracket_stack.push((start, '('));
                     Ok(Token::new(Span::new(start, self.cur_pos()), '('))
                 }
                 '[' => {
-                    self.next();
-                    bracket_stack.push((start, '['));
-                    Ok(Token::new(Span::new(start, self.cur_pos()), '['))
+                    self.advance(1);
+                    if let Some(':') = self.peek() {
+                        self.rewind(1);
+                        if let Some(quoted) = self.quoted("[:", ":]") {
+                            let quoted = self.slice(quoted).to_owned();
+                            Ok(Token::new(
+                                Span::new(start, self.cur_pos()),
+                                TokenKind::Quoted(quoted),
+                            ))
+                        } else {
+                            Err(LexError {
+                                pos: self.cur_pos(),
+                                ty: LexErrorType::UnclosedQuote,
+                                recoverable: None,
+                            })
+                        }
+                    } else {
+                        bracket_stack.push((start, '['));
+                        Ok(Token::new(Span::new(start, self.cur_pos()), '['))
+                    }
                 }
                 '{' => {
-                    self.next();
+                    self.advance(1);
                     bracket_stack.push((start, '{'));
                     Ok(Token::new(Span::new(start, self.cur_pos()), '{'))
                 }
                 ')' => {
-                    self.next();
+                    self.advance(1);
                     match bracket_stack.pop() {
                         Some((_, '(')) => Ok(Token::new(Span::new(start, self.cur_pos()), ')')),
                         Some((pair, _)) => Err(LexError {
@@ -352,7 +580,7 @@ impl<'src> Lexer<'src> {
                     }
                 }
                 ']' => {
-                    self.next();
+                    self.advance(1);
                     match bracket_stack.pop() {
                         Some((_, '[')) => Ok(Token::new(Span::new(start, self.cur_pos()), ']')),
                         Some((pair, _)) => Err(LexError {
@@ -368,9 +596,50 @@ impl<'src> Lexer<'src> {
                     }
                 }
                 '}' => {
-                    self.next();
+                    self.advance(1);
+                    let ty = match self.peek() {
+                        Some('/') => {
+                            self.advance(1);
+                            match self.peek() {
+                                Some('@') => {
+                                    self.advance(1);
+                                    TokenKind::RBraceSlashAt
+                                }
+                                _ => TokenKind::RBraceSlash,
+                            }
+                        }
+                        Some('_') => {
+                            self.advance(1);
+                            match self.peek() {
+                                Some('@') => {
+                                    self.advance(1);
+                                    TokenKind::RBraceUnderbarAt
+                                }
+                                Some('/') => {
+                                    self.advance(1);
+                                    match self.peek() {
+                                        Some('@') => {
+                                            self.advance(1);
+                                            TokenKind::RBraceUnderbarSlashAt
+                                        }
+                                        _ => TokenKind::RBraceUnderbarSlash,
+                                    }
+                                }
+                                _ => TokenKind::RBraceUnderbar,
+                            }
+                        }
+                        Some('@') => {
+                            self.advance(1);
+                            TokenKind::RBraceAt
+                        }
+                        Some('*') => {
+                            self.advance(1);
+                            TokenKind::RBraceAsterisk
+                        }
+                        _ => TokenKind::RightBrace,
+                    };
                     match bracket_stack.pop() {
-                        Some((_, '{')) => Ok(Token::new(Span::new(start, self.cur_pos()), '}')),
+                        Some((_, '{')) => Ok(Token::new(Span::new(start, self.cur_pos()), ty)),
                         Some((pair, _)) => Err(LexError {
                             pos: self.cur_pos(),
                             ty: LexErrorType::UnmatchedBracket('{', pair),
@@ -384,9 +653,9 @@ impl<'src> Lexer<'src> {
                     }
                 }
                 '@' => {
-                    self.next();
+                    self.advance(1);
                     if let Some('@') = self.peek() {
-                        self.next();
+                        self.advance(1);
                         Ok(Token::new(
                             Span::new(start, self.cur_pos()),
                             TokenKind::AtAt,
@@ -396,31 +665,29 @@ impl<'src> Lexer<'src> {
                     }
                 }
                 ':' => {
-                    self.next();
-                    match self.peek() {
-                        Some('-') => {
-                            self.next();
-                            Ok(Token::new(
-                                Span::new(start, self.cur_pos()),
-                                TokenKind::ColonDash,
-                            ))
-                        }
-                        _ => Err(LexError {
-                            pos: self.cur_pos(),
-                            ty: LexErrorType::Expected('-'),
-                            recoverable: Some((TokenKind::ColonDash, tokens.len())),
-                        }),
+                    self.advance(1);
+                    if let Some('-') = self.peek() {
+                        self.advance(1);
+                        Ok(Token::new(
+                            Span::new(start, self.cur_pos()),
+                            TokenKind::ColonDash,
+                        ))
+                    } else {
+                        Ok(Token::new(
+                            Span::new(start, self.cur_pos()),
+                            TokenKind::Colon,
+                        ))
                     }
                 }
                 c if c.is_whitespace() => {
-                    self.next();
+                    self.advance(1);
                     continue;
                 }
                 '+' => {
-                    self.next();
+                    self.advance(1);
                     match self.peek() {
                         Some('.') => {
-                            self.next();
+                            self.advance(1);
                             Ok(Token::new(
                                 Span::new(start, self.cur_pos()),
                                 TokenKind::Operator(Operator::FAdd),
@@ -433,10 +700,10 @@ impl<'src> Lexer<'src> {
                     }
                 }
                 '-' => {
-                    self.next();
+                    self.advance(1);
                     match self.peek() {
                         Some('.') => {
-                            self.next();
+                            self.advance(1);
                             Ok(Token::new(
                                 Span::new(start, self.cur_pos()),
                                 TokenKind::Operator(Operator::FSub),
@@ -449,43 +716,47 @@ impl<'src> Lexer<'src> {
                     }
                 }
                 '*' => {
-                    self.next();
-                    match self.peek() {
+                    self.advance(1);
+                    let op = match self.peek() {
                         Some('.') => {
-                            self.next();
-                            Ok(Token::new(
-                                Span::new(start, self.cur_pos()),
-                                TokenKind::Operator(Operator::FMul),
-                            ))
+                            self.advance(1);
+                            Operator::FMul
                         }
-                        _ => Ok(Token::new(
-                            Span::new(start, self.cur_pos()),
-                            TokenKind::Operator(Operator::IMul),
-                        )),
-                    }
+                        Some('*') => {
+                            self.advance(1);
+                            Operator::IPow
+                        }
+                        _ => Operator::IMul,
+                    };
+                    Ok(Token::new(
+                        Span::new(start, self.cur_pos()),
+                        TokenKind::Operator(op),
+                    ))
                 }
                 '/' => {
-                    self.next();
+                    self.advance(1);
                     match self.peek() {
                         Some('.') => {
-                            self.next();
+                            self.advance(1);
                             Ok(Token::new(
                                 Span::new(start, self.cur_pos()),
                                 TokenKind::Operator(Operator::FDiv),
                             ))
                         }
                         Some('/') => {
-                            self.next();
+                            // line comment
+                            self.advance(1);
                             self.take_while(|c| c != '\n');
                             continue;
                         }
                         Some('*') => {
-                            self.next();
+                            // block comment
+                            self.advance(1);
                             loop {
                                 match self.next() {
                                     Some('*') => {
                                         if self.peek() == Some('/') {
-                                            self.next();
+                                            self.advance(1);
                                             break;
                                         }
                                     }
@@ -502,27 +773,26 @@ impl<'src> Lexer<'src> {
                     }
                 }
                 '%' => {
-                    self.next();
-                    Ok(Token::new(
-                        Span::new(start, self.cur_pos()),
-                        TokenKind::Operator(Operator::IMod),
-                    ))
+                    // line comment
+                    self.advance(1);
+                    self.take_while(|c| c != '\n');
+                    continue;
                 }
                 '>' => {
-                    self.next();
+                    self.advance(1);
                     match self.peek() {
                         Some('.') => {
-                            self.next();
+                            self.advance(1);
                             Ok(Token::new(
                                 Span::new(start, self.cur_pos()),
                                 TokenKind::Operator(Operator::FGt),
                             ))
                         }
                         Some('=') => {
-                            self.next();
+                            self.advance(1);
                             match self.peek() {
                                 Some('.') => {
-                                    self.next();
+                                    self.advance(1);
                                     Ok(Token::new(
                                         Span::new(start, self.cur_pos()),
                                         TokenKind::Operator(Operator::FGe),
@@ -535,9 +805,9 @@ impl<'src> Lexer<'src> {
                             }
                         }
                         Some('+') | Some('*') => {
-                            self.next();
+                            self.advance(1);
                             if let Some('<') = self.peek() {
-                                self.next();
+                                self.advance(1);
                                 Ok(Token::new(
                                     Span::new(start, self.cur_pos()),
                                     TokenKind::Operator(Operator::HyperlinkFuse),
@@ -554,14 +824,14 @@ impl<'src> Lexer<'src> {
                             }
                         }
                         Some('<') => {
-                            self.next();
+                            self.advance(1);
                             Ok(Token::new(
                                 Span::new(start, self.cur_pos()),
                                 TokenKind::Operator(Operator::HyperlinkFuse),
                             ))
                         }
                         Some('>') => {
-                            self.next();
+                            self.advance(1);
                             Ok(Token::new(
                                 Span::new(start, self.cur_pos()),
                                 TokenKind::Operator(Operator::HyperlinkUnify),
@@ -574,20 +844,20 @@ impl<'src> Lexer<'src> {
                     }
                 }
                 '<' => {
-                    self.next();
+                    self.advance(1);
                     match self.peek() {
                         Some('.') => {
-                            self.next();
+                            self.advance(1);
                             Ok(Token::new(
                                 Span::new(start, self.cur_pos()),
                                 TokenKind::Operator(Operator::FLt),
                             ))
                         }
                         Some('=') => {
-                            self.next();
+                            self.advance(1);
                             match self.peek() {
                                 Some('.') => {
-                                    self.next();
+                                    self.advance(1);
                                     Ok(Token::new(
                                         Span::new(start, self.cur_pos()),
                                         TokenKind::Operator(Operator::FLe),
@@ -600,7 +870,7 @@ impl<'src> Lexer<'src> {
                             }
                         }
                         Some('<') => {
-                            self.next();
+                            self.advance(1);
                             Ok(Token::new(
                                 Span::new(start, self.cur_pos()),
                                 TokenKind::Operator(Operator::HyperlinkUnify),
@@ -613,16 +883,16 @@ impl<'src> Lexer<'src> {
                     }
                 }
                 '=' => {
-                    self.next();
+                    self.advance(1);
                     match self.peek() {
                         Some(':') => {
-                            self.next();
+                            self.advance(1);
                             match self.peek() {
                                 Some('=') => {
-                                    self.next();
+                                    self.advance(1);
                                     match self.peek() {
                                         Some('.') => {
-                                            self.next();
+                                            self.advance(1);
                                             Ok(Token::new(
                                                 Span::new(start, self.cur_pos()),
                                                 TokenKind::Operator(Operator::FEq),
@@ -645,13 +915,13 @@ impl<'src> Lexer<'src> {
                             }
                         }
                         Some('\\') => {
-                            self.next();
+                            self.advance(1);
                             match self.peek() {
                                 Some('=') => {
-                                    self.next();
+                                    self.advance(1);
                                     match self.peek() {
                                         Some('.') => {
-                                            self.next();
+                                            self.advance(1);
                                             Ok(Token::new(
                                                 Span::new(start, self.cur_pos()),
                                                 TokenKind::Operator(Operator::FNe),
@@ -674,10 +944,10 @@ impl<'src> Lexer<'src> {
                             }
                         }
                         Some('=') => {
-                            self.next();
+                            self.advance(1);
                             match self.peek() {
                                 Some('=') => {
-                                    self.next();
+                                    self.advance(1);
                                     Ok(Token::new(
                                         Span::new(start, self.cur_pos()),
                                         TokenKind::Operator(Operator::UnaryEq),
@@ -696,13 +966,13 @@ impl<'src> Lexer<'src> {
                     }
                 }
                 '\\' => {
-                    self.next();
+                    self.advance(1);
                     match self.peek() {
                         Some('=') => {
-                            self.next();
+                            self.advance(1);
                             match self.peek() {
                                 Some('=') => {
-                                    self.next();
+                                    self.advance(1);
                                     Ok(Token::new(
                                         Span::new(start, self.cur_pos()),
                                         TokenKind::Operator(Operator::UnaryNe),
@@ -718,7 +988,7 @@ impl<'src> Lexer<'src> {
                     }
                 }
                 _ => {
-                    self.next();
+                    self.advance(1);
                     Err(LexError {
                         pos: self.cur_pos(),
                         ty: LexErrorType::UnexpectedCharacter(c),
@@ -740,8 +1010,73 @@ impl<'src> Lexer<'src> {
                 });
             }
         }
-        LexingResult { tokens, errors }
+        LexingResult {
+            tokens,
+            errors,
+            warnings: self.warnings,
+        }
     }
+}
+
+/// Check if the character is a valid character.
+///
+/// Valid characters are:
+/// - ASCII characters      (e.g. a, b, c, 1, 2, 3, ...)
+/// - Unicode characters    (e.g. \u{XXXX})
+/// - Control characters    (e.g. \n, \r, \t, \0)
+/// - Escape characters     (e.g. \\, \", \', \`)
+fn is_char(c: &str) -> Option<char> {
+    let chars = c.chars().collect::<Vec<_>>();
+    if chars.len() == 1 && chars[0] != '\\' {
+        return Some(chars[0]);
+    }
+    if chars.len() == 2 && chars[0] == '\\' {
+        match chars[1] {
+            // ASCII escape characters
+            'n' => Some('\n'),
+            'r' => Some('\r'),
+            't' => Some('\t'),
+            '\\' => Some('\\'),
+            '0' => Some('\0'),
+
+            // Quote characters
+            '"' => Some('"'),
+            '\'' => Some('\''),
+            _ => None,
+        }
+    } else if chars.len() == 4 && chars[0] == '\\' {
+        // ASCII escape characters (e.g. \x7f)
+        if let Ok(c) = u32::from_str_radix(&c[1..], 16) {
+            if let Some(c) = std::char::from_u32(c) {
+                return Some(c);
+            }
+        }
+        None
+    } else if c.starts_with("\\u{") && c.ends_with('}') {
+        let c = c.trim_start_matches("\\u{").trim_end_matches('}');
+        if let Ok(c) = u32::from_str_radix(c, 16) {
+            if let Some(c) = std::char::from_u32(c) {
+                return Some(c);
+            }
+        }
+        None
+    } else {
+        None
+    }
+}
+
+#[test]
+fn test_is_char() {
+    assert!(is_char("a").is_some());
+    assert!(is_char("1").is_some());
+    assert!(is_char("\u{3042}").is_some());
+    assert!(is_char("\n").is_some());
+    assert!(is_char("\\n").is_some());
+    assert!(is_char("\\u{3042}").is_some());
+    assert!(is_char("\\u{3z42}").is_none());
+    assert!(is_char("ab").is_none());
+    assert!(is_char("\\").is_none());
+    assert!(is_char("\\u").is_none());
 }
 
 #[test]
@@ -762,17 +1097,28 @@ fn test_lexing_number() {
         };
     }
 
-    test_number!("0".to_owned(), TokenKind::Int(0));
-    test_number!("0.".to_owned(), TokenKind::Int(0));
-    test_number!("0x1234".to_owned(), TokenKind::Int(0x1234));
-    test_number!("1234".to_owned(), TokenKind::Int(1234));
-    test_number!("1234.5678".to_owned(), TokenKind::Float(1234.5678));
+    use crate::frontend::token::Number;
+
+    test_number!("0".to_owned(), TokenKind::Number(Number::Decimal(0)));
+    test_number!("0.".to_owned(), TokenKind::Number(Number::Decimal(0))); // the dot is not consumed
+    test_number!("0b101".to_owned(), TokenKind::Number(Number::Binary(5)));
+    test_number!("0o123".to_owned(), TokenKind::Number(Number::Octal(83)));
+    test_number!(
+        "0x1234".to_owned(),
+        TokenKind::Number(Number::Hexadecimal(0x1234))
+    );
+    test_number!("1234".to_owned(), TokenKind::Number(Number::Decimal(1234)));
+    test_number!(
+        "1234.5678".to_owned(),
+        TokenKind::Number(Number::Float(1234.5678))
+    );
 
     wrong!("0x");
 }
 
 #[test]
 fn test_lexing() {
+    // legal tokens but invalid syntax
     let source = r#"
     a, b, c.
     hello(X) :- X = 1.
@@ -780,24 +1126,29 @@ fn test_lexing() {
     "#;
 
     let source = Source::from_string(source.to_owned());
-    let mut lexer = Lexer::new(&source);
+    let lexer = Lexer::new(&source);
     let result = lexer.lex();
-    assert_eq!(result.errors.len(), 1);
-    assert_eq!(result.tokens.len(), 22);
+    assert_eq!(result.errors.len(), 0);
+    assert_eq!(result.tokens.len(), 23);
 }
 
 #[test]
 fn test_lexing_operator() {
-    let source = Source::from_string("'a' + b *. c =:= d".to_owned());
-    let mut lexer = Lexer::new(&source);
+    let source = Source::from_string("#\"a\" + b *. c =:= d lsh e".to_owned());
+    let lexer = Lexer::new(&source);
     let result = lexer.lex();
     assert_eq!(result.errors.len(), 0);
-    assert_eq!(result.tokens.len(), 7);
+    assert_eq!(result.tokens.len(), 9);
     assert_eq!(result.tokens[0].kind, TokenKind::Char('a'));
     assert_eq!(result.tokens[1].kind, TokenKind::Operator(Operator::IAdd));
-    assert_eq!(result.tokens[2].kind, TokenKind::Identifier("b".to_owned()));
+    assert_eq!(result.tokens[2].kind, TokenKind::AtomName("b".to_owned()));
     assert_eq!(result.tokens[3].kind, TokenKind::Operator(Operator::FMul));
-    assert_eq!(result.tokens[4].kind, TokenKind::Identifier("c".to_owned()));
+    assert_eq!(result.tokens[4].kind, TokenKind::AtomName("c".to_owned()));
     assert_eq!(result.tokens[5].kind, TokenKind::Operator(Operator::IEq));
-    assert_eq!(result.tokens[6].kind, TokenKind::Identifier("d".to_owned()));
+    assert_eq!(result.tokens[6].kind, TokenKind::AtomName("d".to_owned()));
+    assert_eq!(
+        result.tokens[7].kind,
+        TokenKind::Operator(Operator::LogicalShift)
+    );
+    assert_eq!(result.tokens[8].kind, TokenKind::AtomName("e".to_owned()));
 }

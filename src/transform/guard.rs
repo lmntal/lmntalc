@@ -6,7 +6,7 @@ use crate::{
         guard::{Guard, GuardNode, GuardSource, ProcessConstraint, VariableId, RESERVED_FUNC},
         rule::Rule,
     },
-    Process, ProcessList,
+    FunctorName, Process, ProcessList,
 };
 
 pub(super) fn visit_guard(rule: &mut Rule, process_list: &ProcessList) -> Guard {
@@ -35,8 +35,8 @@ pub(super) fn visit_guard(rule: &mut Rule, process_list: &ProcessList) -> Guard 
                     guards.add_constraint(node);
                 }
                 // type constraint
-                AtomName::Keyword(s) => {
-                    let ty = ProcessConstraint::from(s.as_str());
+                AtomName::Functor(FunctorName::AtomName(s)) => {
+                    let ty = from_keyword(s);
                     let mut vars = Vec::new();
                     for arg in &atom.args {
                         if let Process::Link(link) = arg {
@@ -71,8 +71,11 @@ fn transform_guard_expr(expr: &Process, defined: &HashMap<String, VariableId>) -
                 let rhs = transform_guard_expr(rhs, defined);
                 GuardNode::Binary(*op, Box::new(lhs), Box::new(rhs))
             }
-            AtomName::Plain(name) => {
-                if let Some(func) = RESERVED_FUNC.iter().find(|func| func.name == name) {
+            AtomName::Functor(name) => {
+                if let Some(func) = RESERVED_FUNC
+                    .iter()
+                    .find(|func| func.name == name.to_string())
+                {
                     let vars = atom
                         .args
                         .iter()
@@ -83,7 +86,7 @@ fn transform_guard_expr(expr: &Process, defined: &HashMap<String, VariableId>) -
                     panic!("cannot find function {}", name)
                 }
             }
-            AtomName::Keyword(..) | AtomName::Char(..) => unreachable!(),
+            AtomName::Char(..) => unreachable!(),
         },
         Process::Hyperlink(hyperlink) => {
             if let Some(id) = defined.get(&hyperlink.name.0) {
@@ -105,5 +108,17 @@ fn transform_guard_expr(expr: &Process, defined: &HashMap<String, VariableId>) -
         _ => {
             unreachable!()
         }
+    }
+}
+
+fn from_keyword(s: &str) -> ProcessConstraint {
+    match s {
+        "int" => ProcessConstraint::Int,
+        "float" => ProcessConstraint::Float,
+        "hlink" => ProcessConstraint::Hyperlink,
+        "ground" => ProcessConstraint::Ground,
+        "unary" => ProcessConstraint::Unary,
+        "uniq" => ProcessConstraint::Unique,
+        _ => panic!("illegal type constraint"),
     }
 }

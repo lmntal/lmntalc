@@ -6,12 +6,20 @@ use termtree::Tree;
 
 #[derive(Debug, Clone)]
 pub enum AtomName {
-    Plain(String),
-    Keyword(String),
     Operator(Operator),
     Int(i64),
     Float(f64),
     Char(char),
+    Functor(FunctorName),
+}
+
+#[derive(Debug, Clone)]
+pub enum FunctorName {
+    AtomName(String),
+    PathedAtomName(Vec<String>),
+    SymbolName(String),
+    String(String),
+    QuotedString(String),
 }
 
 type Spanned<T> = (T, Span);
@@ -67,10 +75,17 @@ pub struct Link {
 }
 
 #[derive(Debug)]
+pub struct Hyperlink {
+    pub name: Spanned<String>,
+    pub attr: Option<FunctorName>,
+    pub span: Span,
+}
+
+#[derive(Debug)]
 pub struct ProcessContext {
     pub name: Spanned<String>,
     pub args: Vec<Link>,
-    pub bundle: Option<Bundle>,
+    pub bundle: Option<LinkBundle>,
     pub span: Span,
 }
 
@@ -91,9 +106,8 @@ macro_rules! simple_ast {
 }
 
 simple_ast! {
-    Hyperlink,
     RuleContext,
-    Bundle,
+    LinkBundle,
 }
 
 #[derive(Debug)]
@@ -101,7 +115,9 @@ pub enum Process {
     Atom(Atom),
     Membrane(Membrane),
     Link(Link),
+    LinkBundle(LinkBundle),
     Hyperlink(Hyperlink),
+    Rule(Rule),
     ProcessContext(ProcessContext),
     RuleContext(RuleContext),
 }
@@ -126,7 +142,9 @@ impl_process! {
     Atom(Atom),
     Membrane(Membrane),
     Link(Link),
+    LinkBundle(LinkBundle),
     Hyperlink(Hyperlink),
+    Rule(Rule),
     ProcessContext(ProcessContext),
     RuleContext(RuleContext),
 }
@@ -137,22 +155,42 @@ impl Process {
             Process::Atom(atom) => format!("Atom: {}", atom.name.0),
             Process::Membrane(membrane) => format!("Membrane: {}", membrane.name.0),
             Process::Link(link) => format!("Link: {}", link.name),
+            Process::LinkBundle(bundle) => format!("Link Bundle: {}", bundle.name.0),
             Process::Hyperlink(hyperlink) => format!("Hyperlink: {}", hyperlink.name.0),
+            Process::Rule(rule) => format!("Rule: {}", rule.name.0),
             Process::ProcessContext(context) => format!("Process Context: {}", context.name.0),
             Process::RuleContext(context) => format!("Rule Context: {}", context.name.0),
         }
+    }
+
+    pub fn span(&self) -> Span {
+        match self {
+            Process::Atom(atom) => atom.span,
+            Process::Membrane(membrane) => membrane.span,
+            Process::Link(link) => link.span,
+            Process::LinkBundle(bundle) => bundle.span,
+            Process::Hyperlink(hyperlink) => hyperlink.span,
+            Process::Rule(rule) => rule.span,
+            Process::ProcessContext(context) => context.span,
+            Process::RuleContext(context) => context.span,
+        }
+    }
+}
+
+impl AtomName {
+    pub(crate) fn new_plain(name: String) -> Self {
+        AtomName::Functor(FunctorName::AtomName(name))
     }
 }
 
 impl Display for AtomName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AtomName::Plain(s) => write!(f, "{}", s),
-            AtomName::Keyword(s) => write!(f, "{}", s),
             AtomName::Operator(op) => write!(f, "{}", op),
             AtomName::Int(i) => write!(f, "{}", i),
             AtomName::Float(fl) => write!(f, "{}", fl),
             AtomName::Char(c) => write!(f, "{}", c),
+            AtomName::Functor(name) => write!(f, "{}", name),
         }
     }
 }
@@ -160,6 +198,26 @@ impl Display for AtomName {
 impl From<Operator> for AtomName {
     fn from(op: Operator) -> Self {
         AtomName::Operator(op)
+    }
+}
+
+impl Display for FunctorName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FunctorName::AtomName(name) => write!(f, "{}", name),
+            FunctorName::PathedAtomName(names) => {
+                for (i, name) in names.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ".")?;
+                    }
+                    write!(f, "{}", name)?;
+                }
+                Ok(())
+            }
+            FunctorName::SymbolName(name) => write!(f, "{}", name),
+            FunctorName::String(s) => write!(f, "{}", s),
+            FunctorName::QuotedString(s) => write!(f, "{}", s),
+        }
     }
 }
 

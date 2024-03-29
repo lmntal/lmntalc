@@ -442,6 +442,7 @@ fn print_operation(op: &Operation) -> String {
                     crate::ir::BinaryOperator::Mul => "*",
                     crate::ir::BinaryOperator::Div => "/",
                     crate::ir::BinaryOperator::Mod => "%",
+                    crate::ir::BinaryOperator::Pow => "**",
                     crate::ir::BinaryOperator::Eq => "==",
                     crate::ir::BinaryOperator::Lt => "<",
                     crate::ir::BinaryOperator::Le => "<=",

@@ -178,7 +178,7 @@ fn visit_atom(
     let name = &node.name;
     let args = &node.args;
     let (name, data) = match &name.0 {
-        AtomName::Plain(s) | AtomName::Keyword(s) => (s.to_string(), Data::Empty),
+        AtomName::Functor(s) => (s.to_string(), Data::Empty),
         AtomName::Operator(op) => (op.to_string(), Data::Empty),
         AtomName::Int(i) => ("_int".to_owned(), Data::Int(*i)),
         AtomName::Float(f) => ("_float".to_owned(), Data::Float(*f)),

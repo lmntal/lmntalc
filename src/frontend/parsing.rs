@@ -7,10 +7,13 @@ use crate::{
         token::{Operator, Token, TokenKind},
     },
     util::{OneOf, Pos, Source, Span},
-    Bundle, RuleContext,
+    FunctorName, LinkBundle, RuleContext,
 };
 
-use super::ast::{Atom, Hyperlink, Link, Membrane, Process, ProcessContext, ProcessList, Rule};
+use super::{
+    ast::{Atom, Hyperlink, Link, Membrane, Process, ProcessContext, ProcessList, Rule},
+    token::Number,
+};
 
 /// A parser for LMNtal source code
 #[derive(Debug, Default)]
@@ -22,13 +25,12 @@ pub struct Parser {
 
 #[derive(Debug)]
 pub enum ParseErrorType {
+    ExpectAnItem,
     UnexpectedToken {
         expected: TokenKind,
         found: TokenKind,
     },
     UnexpectedEOF,
-    /// Wrong case for an identifier, may be treated as a warning
-    WrongCase(IdentifierKind),
 }
 
 #[derive(Debug)]
@@ -40,52 +42,13 @@ pub struct ParseError {
 #[derive(Debug, Clone, Copy)]
 pub enum ParseWarningType {
     MissingCommaBetweenProcesses,
+    MissingPeriodAtTheEnd,
 }
 
 #[derive(Debug, Clone)]
 pub struct ParseWarning {
     pub ty: ParseWarningType,
     pub span: Span,
-}
-
-#[derive(Debug)]
-pub enum IdentifierKind {
-    Atom,
-    Membrane,
-    Rule,
-    Process,
-    Link,
-    Context,
-    Bundle,
-}
-
-impl IdentifierKind {
-    pub fn should(&self) -> String {
-        match self {
-            IdentifierKind::Atom => "start with a lowercase letter",
-            IdentifierKind::Membrane => "start with a lowercase letter",
-            IdentifierKind::Rule => "start with a lowercase letter",
-            IdentifierKind::Process => "start with a lowercase letter",
-            IdentifierKind::Link => "start with an uppercase letter",
-            IdentifierKind::Context => "start with a lowercase letter",
-            IdentifierKind::Bundle => "start with an uppercase letter",
-        }
-        .to_owned()
-    }
-}
-
-impl Display for IdentifierKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            IdentifierKind::Atom => write!(f, "atom"),
-            IdentifierKind::Membrane => write!(f, "membrane"),
-            IdentifierKind::Rule => write!(f, "rule"),
-            IdentifierKind::Process => write!(f, "process"),
-            IdentifierKind::Link => write!(f, "link"),
-            IdentifierKind::Context => write!(f, "context"),
-            IdentifierKind::Bundle => write!(f, "bundle"),
-        }
-    }
 }
 
 impl Display for ParseErrorType {
@@ -101,8 +64,8 @@ impl Display for ParseErrorType {
             Self::UnexpectedEOF => {
                 write!(f, "Unexpected EOF")
             }
-            Self::WrongCase(id) => {
-                write!(f, "Wrong case for {}", id)
+            Self::ExpectAnItem => {
+                write!(f, "Expect an item")
             }
         }
     }
@@ -118,7 +81,6 @@ pub struct ParsingResult {
     pub parsing_warnings: Vec<ParseWarning>,
 }
 
-#[allow(dead_code)]
 impl Parser {
     pub fn new() -> Parser {
         Self::default()
@@ -193,28 +155,27 @@ impl Parser {
         }
     }
 
-    /// Advance the position by one
-    fn advance(&self) {
-        self.pos.set(self.pos.get() + 1);
+    fn skip_until<F>(&self, f: F)
+    where
+        F: Fn(&TokenKind) -> bool,
+    {
+        while !f(&self.peek().kind) {
+            self.next();
+        }
     }
 
-    /// Advance the position by n
-    fn advance_n(&self, n: usize) {
+    /// Advance the position by one
+    fn advance(&self, n: usize) {
         self.pos.set(self.pos.get() + n);
     }
 
-    /// Rewind the position by one
-    fn rewind(&self) {
-        self.pos.set(self.pos.get() - 1);
-    }
-
     /// Rewind the position by n
-    fn rewind_n(&self, n: usize) {
+    fn rewind(&self, n: usize) {
         self.pos.set(self.pos.get() - n);
     }
 
     /// Start parsing the source code, the lexing is done in the process
-    pub fn parse(&mut self, tokens: Vec<Token>) -> ParsingResult {
+    pub fn parse(mut self, tokens: Vec<Token>) -> ParsingResult {
         self.tokens = tokens;
         self.pos.set(0);
         self.warnings.clear();
@@ -238,7 +199,7 @@ impl Parser {
                     errors.push(err);
                 }
             }
-            if !self.skip(&TokenKind::Dot) {
+            if !self.skip(&TokenKind::Period) {
                 break;
             }
         }
@@ -264,12 +225,15 @@ impl Parser {
     fn parse_rule_or_process_list(&mut self) -> ParseResult<OneOf<Rule, ProcessList>> {
         let mut name = String::new();
         let mut name_span = Span::dummy();
-        if self.look_ahead(0).kind == TokenKind::Identifier("".to_owned())
-            && self.look_ahead(1).kind == TokenKind::AtAt
-        {
-            name = self.peek().pretty_print();
-            name_span = self.peek().span;
-            self.advance_n(2);
+        match self.look_ahead(0).kind {
+            TokenKind::AtomName(ref name_) | TokenKind::LinkName(ref name_) => {
+                if self.look_ahead(1).kind == TokenKind::AtAt {
+                    name = name_.clone();
+                    name_span = self.peek().span;
+                    self.advance(2);
+                }
+            }
+            _ => {}
         }
         let start = self.pos.get();
         let low = self.peek().span.low();
@@ -300,7 +264,7 @@ impl Parser {
         }
 
         // if the body is empty
-        if self.peek().kind == TokenKind::Dot {
+        if self.peek().kind == TokenKind::Period {
             return Ok(OneOf::Left(Rule {
                 name: (name, name_span),
                 head,
@@ -313,7 +277,7 @@ impl Parser {
 
         let guard_or_body = self.parse_process_list()?;
         if self.skip(&TokenKind::Vert) {
-            if self.peek().kind == TokenKind::Dot {
+            if self.peek().kind == TokenKind::Period {
                 return Ok(OneOf::Left(Rule {
                     name: (name, name_span),
                     head,
@@ -344,27 +308,129 @@ impl Parser {
         }
     }
 
+    fn parse_rule(&mut self) -> ParseResult<Rule> {
+        let mut name = String::new();
+        let mut name_span = Span::dummy();
+        match self.look_ahead(0).kind {
+            TokenKind::AtomName(ref name_) | TokenKind::LinkName(ref name_) => {
+                if self.look_ahead(1).kind == TokenKind::AtAt {
+                    name = name_.clone();
+                    name_span = self.peek().span;
+                    self.advance(2);
+                }
+            }
+            _ => {}
+        }
+        let start = self.pos.get();
+        let low = self.peek().span.low();
+        let mut head = self.parse_process_list()?;
+
+        let mut propagation = None;
+
+        if self.skip(&TokenKind::Backslash) {
+            propagation = Some(head);
+            head = self.parse_process_list()?;
+        }
+
+        if !self.skip(&TokenKind::ColonDash) {
+            // ignore the backslash if it is not followed by a colon dash
+            if let Some(mut propagation) = propagation {
+                head.processes.append(&mut propagation.processes);
+            }
+            return Err(ParseError {
+                ty: ParseErrorType::UnexpectedToken {
+                    expected: TokenKind::ColonDash,
+                    found: self.peek().kind.clone(),
+                },
+                span: self.peek().span,
+            });
+        }
+
+        let end = self.pos.get();
+        if name.is_empty() {
+            name = self.tokens[start..end - 1]
+                .iter()
+                .map(|t| t.pretty_print())
+                .collect::<Vec<String>>()
+                .join("");
+        }
+
+        // if the body is empty
+        if self.peek().kind == TokenKind::Period {
+            return Ok(Rule {
+                name: (name, name_span),
+                head,
+                propagation,
+                guard: None,
+                body: None,
+                span: Span::new(low, self.look_back(1).span.high()),
+            });
+        }
+
+        let guard_or_body = self.parse_process_list()?;
+        if self.skip(&TokenKind::Vert) {
+            if self.peek().kind == TokenKind::Period {
+                return Ok(Rule {
+                    name: (name, name_span),
+                    head,
+                    propagation,
+                    guard: Some(guard_or_body),
+                    body: None,
+                    span: Span::new(low, self.look_back(1).span.high()),
+                });
+            }
+            let body = self.parse_process_list()?;
+            Ok(Rule {
+                name: (name, name_span),
+                head,
+                propagation,
+                guard: Some(guard_or_body),
+                body: Some(body),
+                span: Span::new(low, self.look_back(1).span.high()),
+            })
+        } else {
+            Ok(Rule {
+                name: (name, name_span),
+                head,
+                propagation,
+                guard: None,
+                body: Some(guard_or_body),
+                span: Span::new(low, self.look_back(1).span.high()),
+            })
+        }
+    }
+
     /// Parse a process list
     fn parse_process_list(&mut self) -> ParseResult<ProcessList> {
         let mut processes = vec![];
         let low = self.peek().span.low();
         let mut warnings = vec![];
         loop {
-            processes.push(self.parse_relation()?);
-            match self.peek().kind {
-                TokenKind::Comma => {
-                    self.advance();
-                    continue;
+            processes.push(self.parse_process()?);
+            let rollback = self.pos.get();
+            if let TokenKind::Comma = self.peek().kind {
+                self.advance(1);
+                continue;
+            } else if let Ok(any) = self.parse_rule_or_process_list() {
+                match any {
+                    OneOf::Left(_) => {
+                        self.pos.set(rollback); // leave for the next parsing
+                        warnings.push(ParseWarning {
+                            ty: ParseWarningType::MissingPeriodAtTheEnd,
+                            span: self.peek().span,
+                        });
+                    }
+                    OneOf::Right(process_list) => {
+                        warnings.push(ParseWarning {
+                            ty: ParseWarningType::MissingCommaBetweenProcesses,
+                            span: self.peek().span,
+                        });
+                        processes.extend(process_list.processes);
+                    }
                 }
-                // Missing a comma, treated as if it were present and give a warning
-                TokenKind::Identifier(_) | TokenKind::LeftBrace => {
-                    warnings.push(ParseWarning {
-                        ty: ParseWarningType::MissingCommaBetweenProcesses,
-                        span: self.peek().span,
-                    });
-                    continue;
-                }
-                _ => break,
+                continue;
+            } else {
+                break;
             }
         }
 
@@ -376,13 +442,119 @@ impl Parser {
         })
     }
 
+    /// Process := Atom | NEG Atom | Aggregate
+    fn parse_process(&mut self) -> ParseResult<Process> {
+        let token = self.peek().clone();
+        match token.kind {
+            TokenKind::Operator(Operator::Negative) => {
+                self.advance(1);
+                let expr = self.parse_atom()?;
+                Ok(expr)
+            }
+            _ => {
+                if let Ok(atom) = self.parse_atom() {
+                    Ok(atom)
+                } else if let Ok(aggregate) = self.parse_aggregate() {
+                    Ok(aggregate.into())
+                } else {
+                    Err(ParseError {
+                        ty: ParseErrorType::ExpectAnItem,
+                        span: token.span,
+                    })
+                }
+            }
+        }
+    }
+
+    fn parse_aggregate(&mut self) -> ParseResult<Atom> {
+        let token = self.peek();
+        let start = token.span.low();
+
+        let name = if let Some(name) = self.try_func_name() {
+            self.advance(1);
+            (
+                AtomName::Functor(name),
+                Span::new(start, self.peek().span.high()),
+            )
+        } else {
+            return Err(ParseError {
+                ty: ParseErrorType::UnexpectedToken {
+                    expected: TokenKind::AtomName("func name".to_owned()),
+                    found: token.kind.clone(),
+                },
+                span: token.span,
+            });
+        };
+
+        self.expect(&TokenKind::LeftParen)?;
+
+        let mut processes = vec![];
+
+        while let Ok(res) = self.parse_bundle() {
+            processes.push(res.into());
+            if self.skip(&TokenKind::Period) {
+                continue;
+            }
+            break;
+        }
+
+        let token = self.expect(&TokenKind::RightParen)?;
+
+        Ok(Atom {
+            name,
+            args: processes,
+            span: Span::new(start, token.span.high()),
+        })
+    }
+
+    /// TopAtom := Relation | AtomName ":" TopAtom
+    fn parse_atom(&mut self) -> ParseResult<Process> {
+        let cur = self.peek().clone();
+        let next = self.look_ahead(1).clone();
+        if let TokenKind::Colon = next.kind {
+            let name = match &cur.kind {
+                TokenKind::AtomName(name) => {
+                    Some(AtomName::Functor(FunctorName::AtomName(name.clone())))
+                }
+                TokenKind::Number(Number::Decimal(n)) => Some(AtomName::Int(*n)),
+                _ => None,
+            };
+            if let Some(name) = name {
+                self.advance(2);
+                let atom = self.parse_atom()?;
+                let span = cur.span.merge(atom.span());
+                let args = vec![
+                    Process::Atom(Atom {
+                        name: (name, cur.span),
+                        args: vec![],
+                        span: cur.span,
+                    }),
+                    atom,
+                ];
+                Ok(Process::Atom(Atom {
+                    name: (
+                        AtomName::Functor(FunctorName::AtomName(":".to_owned())),
+                        next.span,
+                    ),
+                    args,
+                    span,
+                }))
+            } else {
+                self.parse_relation()
+            }
+        } else {
+            self.parse_relation()
+        }
+    }
+
+    /// Parse a relation expression
     fn parse_relation(&mut self) -> ParseResult<Process> {
         let lhs = self.parse_expr(0)?;
         if self.peek().kind.is_relational() {
             let op = self.peek().kind.operator().unwrap();
             let op_span = self.peek().span;
             let span = self.peek().span;
-            self.advance();
+            self.advance(1);
             let rhs = self.parse_expr(0)?;
             Ok(Process::Atom(Atom {
                 name: (op.into(), op_span),
@@ -399,8 +571,8 @@ impl Parser {
         let op = self.peek().kind.clone();
         let span = self.peek().span;
         let mut lhs = match op {
-            TokenKind::Operator(op) if op == Operator::IAdd || op == Operator::ISub => {
-                let rhs = self.parse_expr(prefix_binding_power(&op))?;
+            TokenKind::Operator(op) if op.is_prefix() => {
+                let rhs = self.parse_expr(op.prefix_binding_power())?;
                 Process::Atom(Atom {
                     name: (op.into(), span),
                     args: vec![rhs],
@@ -408,12 +580,12 @@ impl Parser {
                 })
             }
             TokenKind::LeftParen => {
-                self.advance();
+                self.advance(1);
                 let expr = self.parse_expr(0)?;
                 self.expect(&TokenKind::RightParen)?;
                 expr
             }
-            _ => self.parse_process()?,
+            _ => self.parse_unit_atom()?,
         };
 
         loop {
@@ -423,11 +595,11 @@ impl Parser {
                 break;
             }
             let op = op.operator().unwrap();
-            let (left_bp, right_bp) = infix_binding_power(&op);
+            let (left_bp, right_bp) = op.infix_binding_power();
             if left_bp < min_bp {
                 break;
             }
-            self.advance();
+            self.advance(1);
             let rhs = self.parse_expr(right_bp)?;
             lhs = Process::Atom(Atom {
                 name: (op.into(), span),
@@ -440,10 +612,30 @@ impl Parser {
     }
 
     /// Parse a process, which can be a membrane, an atom, a link or a context
-    fn parse_process(&mut self) -> ParseResult<Process> {
+    fn parse_unit_atom(&mut self) -> ParseResult<Process> {
+        if let TokenKind::LeftParen = self.peek().kind {
+            let rollback = self.pos.get();
+            self.advance(1);
+            if let TokenKind::Operator(op) = self.peek().kind {
+                self.advance(1);
+                let atom = Atom {
+                    name: (op.into(), self.peek().span),
+                    args: vec![],
+                    span: self.peek().span,
+                };
+                self.expect(&TokenKind::RightParen)?;
+                return Ok(atom.into());
+            } else if let Ok(rule) = self.parse_rule() {
+                self.expect(&TokenKind::RightParen)?;
+                return Ok(rule.into());
+            }
+            self.pos.set(rollback);
+        }
         if let Ok(res) = self.parse_membrane() {
             Ok(res.into())
-        } else if let Ok(res) = self.parse_atom() {
+        } else if let Ok(res) = self.parse_single_atom() {
+            Ok(res.into())
+        } else if let Ok(res) = self.parse_list() {
             Ok(res.into())
         } else if let Ok(res) = self.parse_hyperlink() {
             Ok(res.into())
@@ -455,10 +647,7 @@ impl Parser {
             Ok(res.into())
         } else {
             Err(ParseError {
-                ty: ParseErrorType::UnexpectedToken {
-                    expected: TokenKind::Identifier("any identifier".to_owned()),
-                    found: self.peek().kind.clone(),
-                },
+                ty: ParseErrorType::ExpectAnItem,
                 span: self.peek().span,
             })
         }
@@ -470,22 +659,15 @@ impl Parser {
         let mut m_name = String::new();
         let mut m_span = Span::dummy();
 
-        if let TokenKind::Identifier(name) = &token.kind {
-            // check if the name starts with a non_uppercase letter
-            if name.starts_with(|c: char| c.is_uppercase()) {
-                return Err(ParseError {
-                    ty: ParseErrorType::WrongCase(IdentifierKind::Membrane),
-                    span: self.peek().span,
-                });
-            }
-            self.advance();
+        if let TokenKind::AtomName(name) = &token.kind {
+            self.advance(1);
             m_name = name.clone();
             m_span = token.span;
         }
 
         if !self.skip(&TokenKind::LeftBrace) {
             if !m_name.is_empty() {
-                self.rewind(); // rewind the name for subsequent parsing since it may be an atom
+                self.rewind(1); // rewind the name for subsequent parsing since it may be an atom
             }
 
             return Err(ParseError {
@@ -509,7 +691,7 @@ impl Parser {
                     processes.push(process_list);
                 }
             }
-            if self.skip(&TokenKind::Dot) {
+            if self.skip(&TokenKind::Period) {
                 continue;
             }
             break;
@@ -526,47 +708,54 @@ impl Parser {
     }
 
     /// Parse an atom: a(X,b,Y)
-    fn parse_atom(&mut self) -> ParseResult<Atom> {
+    fn parse_single_atom(&mut self) -> ParseResult<Atom> {
         let token = self.peek();
         let span = token.span;
-        let name = match &token.kind {
-            TokenKind::Identifier(name) => {
-                // check if the name starts with a non_uppercase letter
-                if name.starts_with(|c: char| c.is_uppercase()) {
-                    return Err(ParseError {
-                        ty: ParseErrorType::WrongCase(IdentifierKind::Atom),
-                        span: self.peek().span,
-                    });
-                }
-                self.advance();
-                AtomName::Plain(name.clone())
-            }
-            TokenKind::Keyword(key) => {
-                self.advance();
-                AtomName::Keyword(key.to_string())
-            }
+        match &token.kind {
             TokenKind::Char(c) => {
-                self.advance();
-                AtomName::Char(*c)
-            }
-            TokenKind::Int(i) => {
-                self.advance();
-                AtomName::Int(*i)
-            }
-            TokenKind::Float(f) => {
-                self.advance();
-                AtomName::Float(*f)
-            }
-            _ => {
-                return Err(ParseError {
-                    ty: ParseErrorType::UnexpectedToken {
-                        expected: TokenKind::Identifier("atom name".to_owned()),
-                        found: self.peek().kind.clone(),
-                    },
-                    span: self.peek().span,
+                self.advance(1);
+                return Ok(Atom {
+                    name: (AtomName::Char(*c), span),
+                    args: Vec::new(),
+                    span,
                 });
             }
+            TokenKind::Number(number) => match number {
+                Number::Binary(n) | Number::Octal(n) | Number::Hexadecimal(n) => {
+                    self.advance(1);
+                    return Ok(Atom {
+                        name: (AtomName::Int(*n), span),
+                        args: Vec::new(),
+                        span,
+                    });
+                }
+                Number::Float(f) => {
+                    self.advance(1);
+                    return Ok(Atom {
+                        name: (AtomName::Float(*f), span),
+                        args: Vec::new(),
+                        span,
+                    });
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+
+        let name = if let TokenKind::Number(Number::Decimal(d)) = token.kind {
+            self.advance(1);
+            AtomName::Int(d)
+        } else {
+            let func = self.try_func_name().ok_or_else(|| ParseError {
+                ty: ParseErrorType::UnexpectedToken {
+                    expected: TokenKind::AtomName("atom name".to_owned()),
+                    found: self.peek().kind.clone(),
+                },
+                span: self.peek().span,
+            })?;
+            AtomName::Functor(func)
         };
+        self.advance(1);
 
         if !self.skip(&TokenKind::LeftParen) {
             Ok(Atom {
@@ -604,32 +793,59 @@ impl Parser {
                 span: self.peek().span,
             });
         }
-        self.parse_link().map(|link| Hyperlink {
-            name: (link.name, link.span),
-            span: Span::new(start, link.span.high()),
-        })
-    }
-
-    fn parse_link(&mut self) -> ParseResult<Link> {
-        let start = self.peek().span.low();
-        let token = self.peek();
-        if let TokenKind::Identifier(ref ident) = token.kind {
-            if ident.starts_with(|c: char| c.is_uppercase()) {
-                self.advance();
-                Ok(Link {
-                    name: ident.clone(),
-                    span: Span::new(start, token.span.high()),
-                })
+        if let TokenKind::LinkName(ref ident) = self.peek().kind {
+            self.advance(1);
+            if self.skip(&TokenKind::Colon) {
+                let attr = self.try_func_name();
+                if attr.is_none() {
+                    // try skip until the next comma or period
+                    self.skip_until(|kind| kind == &TokenKind::Comma || kind == &TokenKind::Period);
+                    Err(ParseError {
+                        ty: ParseErrorType::UnexpectedToken {
+                            expected: TokenKind::LinkName("funtor name".to_owned()),
+                            found: self.peek().kind.clone(),
+                        },
+                        span: self.peek().span,
+                    })
+                } else {
+                    self.advance(1); // skip the functor name
+                    Ok(Hyperlink {
+                        name: (ident.clone(), self.peek().span),
+                        attr,
+                        span: Span::new(start, self.peek().span.high()),
+                    })
+                }
             } else {
-                Err(ParseError {
-                    ty: ParseErrorType::WrongCase(IdentifierKind::Link),
-                    span: self.peek().span,
+                Ok(Hyperlink {
+                    name: (ident.clone(), self.peek().span),
+                    attr: None,
+                    span: Span::new(start, self.peek().span.high()),
                 })
             }
         } else {
             Err(ParseError {
                 ty: ParseErrorType::UnexpectedToken {
-                    expected: TokenKind::Identifier("link name".to_owned()),
+                    expected: TokenKind::LinkName("link name".to_owned()),
+                    found: self.peek().kind.clone(),
+                },
+                span: self.peek().span,
+            })
+        }
+    }
+
+    fn parse_link(&mut self) -> ParseResult<Link> {
+        let start = self.peek().span.low();
+        let token = self.peek();
+        if let TokenKind::LinkName(ref ident) = token.kind {
+            self.advance(1);
+            Ok(Link {
+                name: ident.clone(),
+                span: Span::new(start, token.span.high()),
+            })
+        } else {
+            Err(ParseError {
+                ty: ParseErrorType::UnexpectedToken {
+                    expected: TokenKind::LinkName("link name".to_owned()),
                     found: self.peek().kind.clone(),
                 },
                 span: self.peek().span,
@@ -651,21 +867,14 @@ impl Parser {
         }
         let token = self.peek();
         let name = match &token.kind {
-            TokenKind::Identifier(name) => {
-                // check if the name starts with a non_uppercase letter
-                if name.starts_with(|c: char| c.is_uppercase()) {
-                    return Err(ParseError {
-                        ty: ParseErrorType::WrongCase(IdentifierKind::Context),
-                        span: self.peek().span,
-                    });
-                }
-                self.advance();
+            TokenKind::AtomName(name) => {
+                self.advance(1);
                 name.clone()
             }
             _ => {
                 return Err(ParseError {
                     ty: ParseErrorType::UnexpectedToken {
-                        expected: TokenKind::Identifier("context name".to_owned()),
+                        expected: TokenKind::AtomName("context name".to_owned()),
                         found: self.peek().kind.clone(),
                     },
                     span: self.peek().span,
@@ -726,25 +935,18 @@ impl Parser {
     fn parse_rule_context(&mut self) -> ParseResult<RuleContext> {
         let token = self.peek();
         let start = token.span.low();
-        if !self.skip(&TokenKind::At) {
+        if self.skip(&TokenKind::At) {
             let token = self.peek();
-            if let TokenKind::Identifier(ref ident) = token.kind {
-                if ident.starts_with(|c: char| c.is_lowercase()) {
-                    self.advance();
-                    Ok(RuleContext {
-                        name: (ident.clone(), token.span),
-                        span: Span::new(start, token.span.high()),
-                    })
-                } else {
-                    Err(ParseError {
-                        ty: ParseErrorType::WrongCase(IdentifierKind::Context),
-                        span: self.peek().span,
-                    })
-                }
+            if let TokenKind::AtomName(ref ident) = token.kind {
+                self.advance(1);
+                Ok(RuleContext {
+                    name: (ident.clone(), token.span),
+                    span: Span::new(start, token.span.high()),
+                })
             } else {
                 Err(ParseError {
                     ty: ParseErrorType::UnexpectedToken {
-                        expected: TokenKind::Identifier("context name".to_owned()),
+                        expected: TokenKind::AtomName("context name".to_owned()),
                         found: self.peek().kind.clone(),
                     },
                     span: self.peek().span,
@@ -753,7 +955,7 @@ impl Parser {
         } else {
             Err(ParseError {
                 ty: ParseErrorType::UnexpectedToken {
-                    expected: TokenKind::Dollar,
+                    expected: TokenKind::At,
                     found: self.peek().kind.clone(),
                 },
                 span: self.peek().span,
@@ -762,29 +964,22 @@ impl Parser {
     }
 
     /// Parse a process context: $Context
-    fn parse_bundle(&mut self) -> ParseResult<Bundle> {
+    fn parse_bundle(&mut self) -> ParseResult<LinkBundle> {
         let token = self.peek();
         let start = token.span.low();
         if token.kind == TokenKind::Operator(Operator::IMul) {
-            self.advance();
+            self.advance(1);
             let token = self.peek();
-            if let TokenKind::Identifier(ref ident) = token.kind {
-                if ident.starts_with(|c: char| c.is_uppercase()) {
-                    self.advance();
-                    Ok(Bundle {
-                        name: (ident.clone(), token.span),
-                        span: Span::new(start, token.span.high()),
-                    })
-                } else {
-                    Err(ParseError {
-                        ty: ParseErrorType::WrongCase(IdentifierKind::Bundle),
-                        span: self.peek().span,
-                    })
-                }
+            if let TokenKind::LinkName(ref ident) = token.kind {
+                self.advance(1);
+                Ok(LinkBundle {
+                    name: (ident.clone(), token.span),
+                    span: Span::new(start, token.span.high()),
+                })
             } else {
                 Err(ParseError {
                     ty: ParseErrorType::UnexpectedToken {
-                        expected: TokenKind::Identifier("context name".to_owned()),
+                        expected: TokenKind::LinkName("bundle name".to_owned()),
                         found: self.peek().kind.clone(),
                     },
                     span: self.peek().span,
@@ -800,23 +995,93 @@ impl Parser {
             })
         }
     }
-}
 
-/// Returns the binding power of the prefix operator
-fn prefix_binding_power(op: &Operator) -> u8 {
-    match op {
-        Operator::ISub | Operator::IAdd | Operator::FAdd | Operator::FSub => 9,
-        _ => unreachable!(),
+    /// [] -> "[]"
+    /// [a] -> "."(a, "[]")
+    /// [a, b, c] -> "."(a, "."(b, "."(c, "[]")))
+    /// [a, b | c] -> "."(a, "."(b, c))
+    fn parse_list(&mut self) -> ParseResult<Atom> {
+        let start = self.peek().span.low();
+        self.expect(&TokenKind::LeftBracket)?;
+
+        if let Ok(token) = self.expect(&TokenKind::RightBracket) {
+            return Ok(Atom {
+                name: (
+                    AtomName::new_plain("[]".to_owned()),
+                    Span::new(start, token.span.high()),
+                ),
+                args: Vec::new(),
+                span: self.peek().span,
+            });
+        }
+
+        let mut args = vec![];
+        let mut rem = false;
+
+        while let Ok(process) = self.parse_unit_atom() {
+            args.push(process);
+            if self.skip(&TokenKind::Vert) {
+                args.push(self.parse_unit_atom()?);
+                rem = true;
+                break; // no more arguments after the rem
+            }
+            // TODO: 1. missing comma
+            // TODO: 2. maybe wrong period
+            // Both of them should be reported as warnings
+            if self.skip(&TokenKind::Comma) {
+                continue;
+            }
+        }
+
+        // concatenate the remaining list in reverse order
+        let mut rev_args = args.into_iter().rev();
+        let mut current = if rem {
+            Atom {
+                name: (AtomName::new_plain(".".to_owned()), Span::dummy()),
+                args: vec![rev_args.next().unwrap(), rev_args.next().unwrap()],
+                span: Span::dummy(),
+            }
+        } else {
+            Atom {
+                name: (AtomName::new_plain(".".to_owned()), Span::dummy()),
+                args: vec![
+                    rev_args.next().unwrap(),
+                    Atom {
+                        name: (AtomName::new_plain("[]".to_owned()), Span::dummy()),
+                        args: vec![],
+                        span: Span::dummy(),
+                    }
+                    .into(),
+                ],
+                span: Span::dummy(),
+            }
+        };
+
+        for arg in rev_args {
+            current = Atom {
+                name: (AtomName::new_plain(".".to_owned()), Span::dummy()),
+                args: vec![arg, current.into()],
+                span: Span::dummy(),
+            };
+        }
+
+        self.expect(&TokenKind::RightBracket)?;
+        Ok(current)
     }
-}
 
-/// Returns the binding power of the infix operator
-fn infix_binding_power(op: &Operator) -> (u8, u8) {
-    use Operator::*;
-    match op {
-        IMul | IDiv | IMod | FMul | FDiv => (3, 4),
-        IAdd | ISub | FAdd | FSub => (1, 2),
-        _ => unreachable!(),
+    /// Try to parse a functor name, without consuming the token (for immutable self).
+    ///
+    /// **Don't forget to advance the position if the parsing is successful**
+    fn try_func_name(&self) -> Option<FunctorName> {
+        let content = match &self.peek().kind {
+            TokenKind::AtomName(s) => FunctorName::AtomName(s.clone()),
+            TokenKind::PathedAtomName(s) => FunctorName::PathedAtomName(s.clone()),
+            TokenKind::SymbolName(s) => FunctorName::SymbolName(s.replace("''", "'")),
+            TokenKind::String(s) => FunctorName::String(s.clone()),
+            TokenKind::Quoted(s) => FunctorName::QuotedString(s.clone()),
+            _ => return None,
+        };
+        Some(content)
     }
 }
 
@@ -825,7 +1090,7 @@ fn infix_binding_power(op: &Operator) -> (u8, u8) {
 fn common_init<T>(source: &str, func: fn(&mut Parser) -> ParseResult<T>) -> ParseResult<T> {
     let source = Source::from_string(source.to_owned());
     let mut parser = Parser::new();
-    let mut lexer = Lexer::new(&source);
+    let lexer = Lexer::new(&source);
     let result = lexer.lex();
     parser.tokens = result.tokens;
     func(&mut parser)
@@ -833,13 +1098,19 @@ fn common_init<T>(source: &str, func: fn(&mut Parser) -> ParseResult<T>) -> Pars
 
 #[test]
 fn test_parse_atom() {
-    assert!(common_init("a(X,b,Y)", |p| p.parse_atom()).is_ok());
+    assert!(common_init("a(X,b,Y)", |p| p.parse_single_atom()).is_ok());
+    assert!(common_init("(+)", |p| p.parse_unit_atom()).is_ok());
 }
 
 #[test]
 fn test_parse_expr() {
     let result = common_init("a(X,b,Y) + b * c(e)", |p| p.parse_expr(0));
     assert!(result.is_ok());
+}
+
+#[test]
+fn test_rule_context() {
+    assert!(common_init("@name", |p| p.parse_rule_context()).is_ok());
 }
 
 #[test]
@@ -853,25 +1124,24 @@ fn test_parse_relation() {
 #[test]
 fn test_compicate_process() {
     let source = Source::from_string("a({X,b,Y + b} * c(e)) :- a({X + b :- k. a + c}).".to_owned());
-    let mut lexer = Lexer::new(&source);
+    let lexer = Lexer::new(&source);
     let result = lexer.lex();
-    let mut parser = Parser::new();
+    let parser = Parser::new();
     let result = parser.parse(result.tokens);
     assert!(result.parsing_errors.is_empty());
 }
 
 #[test]
 fn test_parse_membrane() {
-    assert!(common_init("{a(X,b,!Y),c(X,Y). a,b,c :- e}", |p| p.parse_membrane()).is_ok());
+    assert!(common_init("{a(X,b,Y),c(X,Y). a,b,c :- e}", |p| p.parse_membrane()).is_ok());
 }
 
 #[test]
 fn test_parse_rule() {
-    assert!(common_init(
-        "test@@ a(X,b,Y), b{@rule, $p[A, B | *K]} :- int(A) | c(X,Y)",
-        |p| p.parse_rule_or_process_list()
-    )
-    .is_ok());
+    let res = common_init("b{@rule, $p[A, B | *K]} :- int(A) | c(X,Y)", |p| {
+        p.parse_rule_or_process_list()
+    });
+    assert!(res.is_ok());
 }
 
 #[test]
@@ -892,10 +1162,11 @@ fn test_parse_rule_or_process_list() {
 
 #[test]
 fn test_parse_world() {
-    let source = Source::from_string("a(X,b,Y),c(X,Y). a,b \\ c :- 10.".to_owned());
-    let mut lexer = Lexer::new(&source);
+    // let source = Source::from_string("a(X,b,Y),c(X,Y). a,b \\ c :- 10.".to_owned());
+    let source = Source::from_string("a,b , c :- 10.".to_owned());
+    let lexer = Lexer::new(&source);
     let result = lexer.lex();
-    let mut parser = Parser::new();
+    let parser = Parser::new();
     let result = parser.parse(result.tokens);
     assert!(result.parsing_errors.is_empty());
 }
