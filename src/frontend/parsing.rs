@@ -148,7 +148,7 @@ impl Parser {
     /// returns false if the token was not skipped
     fn skip(&self, kind: &TokenKind) -> bool {
         if self.is_match(kind) {
-            self.next();
+            self.advance(1);
             true
         } else {
             false
@@ -723,6 +723,7 @@ impl Parser {
             TokenKind::Number(number) => match number {
                 Number::Binary(n) | Number::Octal(n) | Number::Hexadecimal(n) => {
                     self.advance(1);
+                    dbg!(self.peek());
                     return Ok(Atom {
                         name: (AtomName::Int(*n), span),
                         args: Vec::new(),
@@ -743,7 +744,6 @@ impl Parser {
         }
 
         let name = if let TokenKind::Number(Number::Decimal(d)) = token.kind {
-            self.advance(1);
             AtomName::Int(d)
         } else {
             let func = self.try_func_name().ok_or_else(|| ParseError {
@@ -1028,9 +1028,7 @@ impl Parser {
             // TODO: 1. missing comma
             // TODO: 2. maybe wrong period
             // Both of them should be reported as warnings
-            if self.skip(&TokenKind::Comma) {
-                continue;
-            }
+            self.skip(&TokenKind::Comma);
         }
 
         // concatenate the remaining list in reverse order
