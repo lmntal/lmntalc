@@ -1034,9 +1034,11 @@ impl Parser {
         // concatenate the remaining list in reverse order
         let mut rev_args = args.into_iter().rev();
         let mut current = if rem {
+            let second = rev_args.next().unwrap();
+            let first = rev_args.next().unwrap();
             Atom {
                 name: (AtomName::new_plain(".".to_owned()), Span::dummy()),
-                args: vec![rev_args.next().unwrap(), rev_args.next().unwrap()],
+                args: vec![first, second],
                 span: Span::dummy(),
             }
         } else {
