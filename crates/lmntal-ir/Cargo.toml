@@ -1,0 +1,13 @@
+[package]
+name = "lmntal-ir"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"], optional = true }
+lmntal-model = { path = "../lmntal-model" }
+
+[features]
+default = ["display"]
+serde = ["dep:serde"]
+display = []
