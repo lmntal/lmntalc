@@ -47,31 +47,13 @@ impl<'i> Parser<'i> {
 
     pub(crate) fn nth_at(&self, n: usize, kind: SyntaxKind) -> bool {
         match kind {
-            T![-=] => self.at_composite2(n, T![-], T![=]),
-            T![->] => self.at_composite2(n, T![-], T![>]),
+            T![:-] => self.at_composite2(n, T![:], T![-]),
             T![::] => self.at_composite2(n, T![:], T![:]),
-            T![!=] => self.at_composite2(n, T![!], T![=]),
-            T![..] => self.at_composite2(n, T![.], T![.]),
-            T![*=] => self.at_composite2(n, T![*], T![=]),
-            T![/=] => self.at_composite2(n, T![/], T![=]),
-            T![&&] => self.at_composite2(n, T![&], T![&]),
-            T![&=] => self.at_composite2(n, T![&], T![=]),
-            T![%=] => self.at_composite2(n, T![%], T![=]),
-            T![^=] => self.at_composite2(n, T![^], T![=]),
-            T![+=] => self.at_composite2(n, T![+], T![=]),
-            T![<<] => self.at_composite2(n, T![<], T![<]),
-            T![<=] => self.at_composite2(n, T![<], T![=]),
             T![==] => self.at_composite2(n, T![=], T![=]),
-            T![=>] => self.at_composite2(n, T![=], T![>]),
-            T![>=] => self.at_composite2(n, T![>], T![=]),
-            T![>>] => self.at_composite2(n, T![>], T![>]),
-            T![|=] => self.at_composite2(n, T![|], T![=]),
-            T![||] => self.at_composite2(n, T![|], T![|]),
-
-            T![...] => self.at_composite3(n, T![.], T![.], T![.]),
-            T![..=] => self.at_composite3(n, T![.], T![.], T![=]),
-            T![<<=] => self.at_composite3(n, T![<], T![<], T![=]),
-            T![>>=] => self.at_composite3(n, T![>], T![>], T![=]),
+            T![<<] => self.at_composite2(n, T!['<'], T!['<']),
+            T![<=] => self.at_composite2(n, T!['<'], T![=]),
+            T![>=] => self.at_composite2(n, T!['>'], T![=]),
+            T![>>] => self.at_composite2(n, T!['>'], T!['>']),
 
             _ => self.input.kind(self.pos + n) == kind,
         }
@@ -83,28 +65,15 @@ impl<'i> Parser<'i> {
             return false;
         }
         let n_raw_tokens = match kind {
-            T![-=]
-            | T![->]
+            T![:-]
             | T![::]
-            | T![!=]
-            | T![..]
-            | T![*=]
-            | T![/=]
-            | T![&&]
-            | T![&=]
-            | T![%=]
-            | T![^=]
-            | T![+=]
+            | T![==]
             | T![<<]
             | T![<=]
-            | T![==]
-            | T![=>]
             | T![>=]
-            | T![>>]
-            | T![|=]
-            | T![||] => 2,
+            | T![>>] => 2,
 
-            T![...] | T![..=] | T![<<=] | T![>>=] => 3,
+            T![===] | T![=:=] | T!["=\\="] | T![>=.] => 3,
             _ => 1,
         };
         self.do_bump(kind, n_raw_tokens);
