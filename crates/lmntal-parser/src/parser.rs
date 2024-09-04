@@ -21,7 +21,8 @@ impl<'i> Parser<'i> {
             events: Vec::new(),
         }
     }
-    pub(crate) fn finish(self) -> Vec<Event> {
+
+    pub fn finish(self) -> Vec<Event> {
         self.events
     }
 
@@ -47,13 +48,43 @@ impl<'i> Parser<'i> {
 
     pub(crate) fn nth_at(&self, n: usize, kind: SyntaxKind) -> bool {
         match kind {
-            T![:-] => self.at_composite2(n, T![:], T![-]),
+            T!["@@"] => self.at_composite2(n, T![@], T![@]),
             T![::] => self.at_composite2(n, T![:], T![:]),
+            T![:-] => self.at_composite2(n, T![:], T![-]),
+            T![**] => self.at_composite2(n, T![*], T![*]),
+            T![+.] => self.at_composite2(n, T![+], T![.]),
+            T![-.] => self.at_composite2(n, T![-], T![.]),
+            T![*.] => self.at_composite2(n, T![*], T![.]),
+            T![/.] => self.at_composite2(n, T![/], T![.]),
+            T![>=] => self.at_composite2(n, T![>], T![=]),
+            T![<=] => self.at_composite2(n, T![<], T![=]),
+            T![>.] => self.at_composite2(n, T![>], T![.]),
+            T![<.] => self.at_composite2(n, T![<], T![.]),
             T![==] => self.at_composite2(n, T![=], T![=]),
-            T![<<] => self.at_composite2(n, T!['<'], T!['<']),
-            T![<=] => self.at_composite2(n, T!['<'], T![=]),
-            T![>=] => self.at_composite2(n, T!['>'], T![=]),
-            T![>>] => self.at_composite2(n, T!['>'], T!['>']),
+            T!["\\+"] => self.at_composite2(n, T!['\\'], T![+]),
+            T!["\\="] => self.at_composite2(n, T!['\\'], T![=]),
+            T![><] => self.at_composite2(n, T![>], T![<]),
+            T![<<] => self.at_composite2(n, T![<], T![<]),
+            T![>>] => self.at_composite2(n, T![>], T![>]),
+            T!["}@"] => self.at_composite2(n, T!['}'], T![@]),
+            T!["}/"] => self.at_composite2(n, T!['}'], T![/]),
+            T!["}_"] => self.at_composite2(n, T!['}'], T![_]),
+            T!["}*"] => self.at_composite2(n, T!['}'], T![*]),
+
+            T![===] => self.at_composite3(n, T![=], T![=], T![=]),
+            T![>=.] => self.at_composite3(n, T![>], T![=], T![.]),
+            T![<=.] => self.at_composite3(n, T![<], T![=], T![.]),
+            T![=:=] => self.at_composite3(n, T![=], T![:], T![=]),
+            T!["=\\="] => self.at_composite3(n, T![=], T!['\\'], T![=]),
+            T!["\\=="] => self.at_composite3(n, T!['\\'], T![=], T![=]),
+            T![>*<] => self.at_composite3(n, T![>], T![*], T![<]),
+            T![>+<] => self.at_composite3(n, T![>], T![+], T![<]),
+            T!["}/@"] => self.at_composite3(n, T!['}'], T![/], T![@]),
+            T!["}_@"] => self.at_composite3(n, T!['}'], T![_], T![@]),
+            T!["}_/"] => self.at_composite3(n, T!['}'], T![_], T![/]),
+
+            T![=:=.] => self.at_composite4(n, T![=], T![:], T![=], T![.]),
+            T!["}_/@"] => self.at_composite4(n, T!['}'], T![_], T![/], T![@]),
 
             _ => self.input.kind(self.pos + n) == kind,
         }
@@ -65,15 +96,42 @@ impl<'i> Parser<'i> {
             return false;
         }
         let n_raw_tokens = match kind {
-            T![:-]
+            T!["@@"]
             | T![::]
-            | T![==]
-            | T![<<]
-            | T![<=]
+            | T![:-]
+            | T![**]
+            | T![+.]
+            | T![-.]
+            | T![*.]
+            | T![/.]
             | T![>=]
-            | T![>>] => 2,
+            | T![<=]
+            | T![>.]
+            | T![<.]
+            | T![==]
+            | T!["\\+"]
+            | T!["\\="]
+            | T![><]
+            | T![<<]
+            | T![>>]
+            | T!["}@"]
+            | T!["}/"]
+            | T!["}_"]
+            | T!["}*"] => 2,
 
-            T![===] | T![=:=] | T!["=\\="] | T![>=.] => 3,
+            T![===]
+            | T![>=.]
+            | T![<=.]
+            | T![=:=]
+            | T!["=\\="]
+            | T!["\\=="]
+            | T![>*<]
+            | T![>+<]
+            | T!["}/@"]
+            | T!["}_@"]
+            | T!["}_/"] => 3,
+
+            T![=:=.] | T!["}_/@"] => 4,
             _ => 1,
         };
         self.do_bump(kind, n_raw_tokens);

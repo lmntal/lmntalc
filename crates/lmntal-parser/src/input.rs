@@ -1,5 +1,6 @@
 use crate::syntax_kind::SyntaxKind;
 
+#[derive(Debug, Clone, Default)]
 pub struct Input {
     pub kind: Vec<SyntaxKind>,
 }
