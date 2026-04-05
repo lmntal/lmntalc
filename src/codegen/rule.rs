@@ -508,7 +508,7 @@ fn transform_guard(
                     let atom = rule.all_atoms().get(atom_id).unwrap();
                     let link = atom.args().nth(*port).unwrap();
                     Operation::Variable {
-                        source: ir::VarSource::Head(symbol_table[&atom_id], *port),
+                        source: ir::VarSource::Head(symbol_table[atom_id], *port),
                         ty_: link.opposite_type.unwrap(),
                     }
                 } else {

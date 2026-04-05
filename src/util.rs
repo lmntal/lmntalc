@@ -41,7 +41,7 @@ impl Eq for Pos {}
 
 impl PartialOrd for Pos {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.offset.cmp(&other.offset))
+        Some(self.cmp(other))
     }
 }
 
@@ -66,6 +66,10 @@ impl Pos {
 
     pub fn as_u32(&self) -> u32 {
         self.offset
+    }
+
+    pub fn as_range(&self) -> Range<usize> {
+        self.offset as usize..self.offset as usize
     }
 }
 
