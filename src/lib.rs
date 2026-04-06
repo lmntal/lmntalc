@@ -2,6 +2,8 @@
 pub mod analysis;
 /// This module takes responsibility for the IR code generation.
 pub mod codegen;
+/// The high-level compilation pipeline and entrypoints.
+pub mod compiler;
 /// Includes the frontend for LMNtal code.
 ///
 /// The frontend is responsible for parsing the input and transforming it into an AST.

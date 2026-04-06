@@ -2,6 +2,7 @@ use std::{
     cmp::{self, Ordering},
     fmt::Display,
     hash::{Hash, Hasher},
+    io,
     ops::{Deref, Range, Sub},
     path::Path,
 };
@@ -88,7 +89,7 @@ impl Sub<Pos> for Pos {
 }
 
 /// A range of text within a CodeMap.
-#[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, Default, Serialize, Deserialize)]
 pub struct Span {
     /// The position in the codemap representing the first byte of the span.
     low: Pos,
@@ -202,10 +203,13 @@ impl Source {
     /// The file should exist and be readable by the current user.
     ///
     /// Also, the file should be encoded in UTF-8
-    pub fn from_file(file: &Path) -> Source {
-        let name = file.file_name().unwrap().to_str().unwrap().to_string();
-        let uri = format!("file://{}", file.to_str().unwrap());
-        let source = std::fs::read_to_string(file).unwrap();
+    pub fn from_file(file: &Path) -> io::Result<Source> {
+        let name = file
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| file.display().to_string());
+        let uri = format!("file://{}", file.to_string_lossy());
+        let source = std::fs::read_to_string(file)?;
         let lines = source
             .lines()
             .scan(0, |state, line| {
@@ -214,12 +218,12 @@ impl Source {
                 Some(start)
             })
             .collect();
-        Source {
+        Ok(Source {
             name,
             uri,
             source,
             lines,
-        }
+        })
     }
 
     /// Create a new SourceCode from a string
@@ -256,6 +260,7 @@ impl Source {
     pub fn line_at_offset(&self, offset: usize) -> usize {
         match self.lines.binary_search(&offset) {
             Ok(line) => line,
+            Err(0) => 0,
             Err(line) => line - 1,
         }
     }

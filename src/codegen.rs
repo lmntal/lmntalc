@@ -15,8 +15,13 @@ pub struct Emitter {
 }
 
 #[derive(Debug, Default)]
+pub struct InitIR {
+    pub body: Vec<LMNtalIR>,
+}
+
+#[derive(Debug, Default)]
 pub struct IRSet {
-    pub init: Vec<LMNtalIR>,
+    pub init: InitIR,
     pub rules: Vec<RuleIR>,
 }
 
@@ -27,6 +32,10 @@ impl Emitter {
 
     pub fn ir_set(&self) -> &IRSet {
         &self.ir_set
+    }
+
+    pub fn finish(self) -> IRSet {
+        self.ir_set
     }
 
     /// Generate AST from LMNtal program
@@ -56,15 +65,14 @@ impl Emitter {
     fn gen_init(&mut self, program: &Program) {
         let rule = program.init_rule();
         let mut rule_gen = RuleGenerator::new(rule);
-        let ir = rule_gen.generate();
-        self.ir_set.init = ir.init();
+        self.ir_set.init = rule_gen.generate_init();
     }
 }
 
 impl Display for IRSet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "{}", "Init".bold().underline().red())?;
-        for ir in &self.init {
+        for ir in &self.init.body {
             writeln!(f, "\t{}", ir)?;
         }
         writeln!(f, "{}", "Rules".bold().underline().red())?;

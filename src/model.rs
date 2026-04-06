@@ -8,7 +8,7 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use crate::transform::SolveResult;
+use crate::{transform::SolveResult, util::Span};
 
 use self::{guard::VariableId, rule::Rule};
 
@@ -29,34 +29,34 @@ impl Program {
         &self.init_rule
     }
 
-    pub(crate) fn root_rules(&self) -> &Vec<Rule> {
+    pub(crate) fn root_rules(&self) -> &[Rule] {
         &self.root_rules
     }
 
     pub(crate) fn add_rule(&mut self, rule: Rule) {
         self.root_rules.push(rule);
     }
+
+    pub(crate) fn solve(&mut self) -> SolveResult {
+        let mut res = SolveResult::default();
+
+        res.combine(self.init_rule.solve());
+
+        for rule in &mut self.root_rules {
+            res.combine(rule.solve());
+        }
+
+        res
+    }
 }
 
 #[derive(Debug, Clone, Copy, Eq)]
 pub enum Process {
     /// An atom in a membrane
-    ///
-    /// The first usize is the id of the membrane
-    ///
-    /// The second usize is the id of the atom
     Atom(AtomId),
     /// A membrane in a membrane
-    ///
-    /// The first usize is the id of the parent membrane
-    ///
-    /// The second usize is the id of the membrane
     Membrane(MembraneId),
     /// A hyperlink in a membrane
-    ///
-    /// The first usize is the id of the parent membrane
-    ///
-    /// The second usize is the id of the hyperlink
     Hyperlink(HyperlinkId),
 }
 
@@ -64,7 +64,6 @@ pub enum Process {
 #[derive(Debug, Default, Clone)]
 pub struct Membrane {
     parent: MembraneId,
-
     name: String,
     rules: Vec<RuleId>,
     membranes: HashSet<MembraneId>,
@@ -77,6 +76,7 @@ pub struct Atom {
     pub name: String,
     pub data: Data,
     pub args: Vec<Link>,
+    pub span: Span,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -84,6 +84,7 @@ pub struct Link {
     pub name: String,
     pub this: (AtomId, usize),
     pub opposite: Option<(AtomId, usize)>,
+    pub span: Span,
 }
 
 /// A hyperlink is treated as a special atom
@@ -91,6 +92,7 @@ pub struct Link {
 pub struct Hyperlink {
     pub name: String,
     pub args: Vec<Link>,
+    pub span: Span,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -110,20 +112,6 @@ impl Data {
     }
 }
 
-impl Program {
-    pub(crate) fn solve(&mut self) -> SolveResult {
-        let mut res = SolveResult::default();
-
-        res.combine(self.init_rule.solve());
-
-        for rule in &mut self.root_rules {
-            res.combine(rule.solve());
-        }
-
-        res
-    }
-}
-
 impl Membrane {
     pub(crate) fn add_processes(&mut self, processes: Vec<Process>) {
         for process in processes {
@@ -134,13 +122,9 @@ impl Membrane {
                 Process::Membrane(id) => {
                     self.membranes.insert(id);
                 }
-                _ => {}
+                Process::Hyperlink(_) => {}
             }
         }
-    }
-
-    pub(crate) fn add_rule(&mut self, rule: RuleId) {
-        self.rules.push(rule);
     }
 }
 
@@ -203,6 +187,7 @@ impl PartialEq for Process {
         match (self, other) {
             (Self::Atom(l0), Self::Atom(r0)) => l0 == r0,
             (Self::Membrane(l0), Self::Membrane(r0)) => l0 == r0,
+            (Self::Hyperlink(l0), Self::Hyperlink(r0)) => l0 == r0,
             _ => false,
         }
     }

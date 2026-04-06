@@ -1,8 +1,10 @@
-use core::panic;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 
-use crate::transform::{SolveResult, TransformError};
+use crate::{
+    transform::{SolveResult, TransformError},
+    util::Span,
+};
 
 use super::guard::{GuardNode, GuardSource, ProcessConstraint, VariableId};
 use super::{guard::Guard, Atom, Data, Link, Membrane};
@@ -15,6 +17,7 @@ pub struct RuleAtom {
     parent: MembraneId,
     name: String,
     data: Data,
+    span: Span,
     type_: Option<ProcessConstraint>,
     args: Vec<RuleLink>,
 }
@@ -23,6 +26,7 @@ pub struct RuleAtom {
 #[derive(Debug, Clone)]
 pub struct RuleHyperlink {
     name: String,
+    span: Span,
     first_in_head: bool,
     args: Vec<RuleLink>,
 }
@@ -33,6 +37,8 @@ pub struct Rule {
     pub parent: MembraneId,
     /// Name of the rule
     pub name: String,
+    /// Whole-rule span for diagnostics
+    pub span: Span,
     /// Head
     pub head: MembraneId,
     /// Propagation, with order preserved
@@ -74,6 +80,7 @@ pub enum RuleLinkArg {
 #[derive(Debug, Clone)]
 pub struct RuleLink {
     pub name: String,
+    pub span: Span,
     pub this: RuleLinkArg,
     pub opposite_type: Option<ProcessConstraint>,
     pub opposite: RuleLinkArg,
@@ -101,6 +108,10 @@ impl RuleAtom {
     pub fn type_(&self) -> Option<ProcessConstraint> {
         self.type_
     }
+
+    pub(crate) fn span(&self) -> Span {
+        self.span
+    }
 }
 
 impl RuleHyperlink {
@@ -117,6 +128,7 @@ impl RuleLink {
     fn from(link: &Link, this_in_head: bool, op_in_head: bool) -> Self {
         Self {
             name: link.name.clone(),
+            span: link.span,
             this: if this_in_head {
                 RuleLinkArg::Head(link.this.0, link.this.1)
             } else {
@@ -162,24 +174,12 @@ impl RuleLinkArg {
         }
     }
 
-    pub(crate) fn is_none(&self) -> bool {
-        matches!(self, RuleLinkArg::None)
-    }
-
-    pub(crate) fn is_temp(&self) -> bool {
-        matches!(self, RuleLinkArg::Temp(_, _))
-    }
-
     pub(crate) fn is_head(&self) -> bool {
         matches!(self, RuleLinkArg::Head(_, _))
     }
 
     pub(crate) fn is_body(&self) -> bool {
         matches!(self, RuleLinkArg::Body(_, _))
-    }
-
-    pub(crate) fn is_linked(&self) -> bool {
-        !matches!(self, RuleLinkArg::None)
     }
 }
 
@@ -221,9 +221,11 @@ impl Rule {
         let atom = RuleAtom {
             parent: atom.parent,
             name: atom.name,
+            span: atom.span,
             type_: match &atom.data {
                 Data::Int(_) => Some(ProcessConstraint::Int),
                 Data::Float(_) => Some(ProcessConstraint::Float),
+                Data::String(_) => Some(ProcessConstraint::String),
                 _ => None,
             },
             data: atom.data,
@@ -231,16 +233,14 @@ impl Rule {
                 .args
                 .iter()
                 .map(|link| {
-                    let head = {
-                        if let Some((id, _)) = link.opposite {
-                            if let Some(hl) = self.hyperlinks.get(&id) {
-                                hl.first_in_head
-                            } else {
-                                !self.head_parsed
-                            }
+                    let head = if let Some((id, _)) = link.opposite {
+                        if let Some(hl) = self.hyperlinks.get(&id) {
+                            hl.first_in_head
                         } else {
                             !self.head_parsed
                         }
+                    } else {
+                        !self.head_parsed
                     };
                     RuleLink::from(link, !self.head_parsed, head)
                 })
@@ -249,13 +249,8 @@ impl Rule {
         self.atoms.insert(id, atom);
     }
 
-    #[allow(unused_variables)]
-    pub(crate) fn add_rule(&mut self, rule: Rule, parent: MembraneId) -> super::RuleId {
-        unimplemented!("Generating rules in rules is not supported")
-    }
-
-    pub(crate) fn add_hyperlink(&mut self, name: &str) -> super::HyperlinkId {
-        for (id, link_) in &mut self.hyperlinks {
+    pub(crate) fn add_hyperlink(&mut self, name: &str, span: Span) -> super::HyperlinkId {
+        for (id, link_) in &self.hyperlinks {
             if link_.name == name {
                 return *id;
             }
@@ -264,6 +259,7 @@ impl Rule {
         let id = self.id_generator.next_hyperlink_id();
         let hyperlink = RuleHyperlink {
             name: name.to_owned(),
+            span,
             first_in_head: !self.head_parsed,
             args: vec![],
         };
@@ -280,17 +276,17 @@ impl Rule {
     }
 
     pub(crate) fn append_atom_arg(&mut self, id: AtomId, link: Link) {
-        self.atoms.get_mut(&id).unwrap().args.push(RuleLink::from(
-            &link,
-            !self.head_parsed,
-            !self.head_parsed,
-        ));
+        self.atoms
+            .get_mut(&id)
+            .expect("atom must exist")
+            .args
+            .push(RuleLink::from(&link, !self.head_parsed, !self.head_parsed));
     }
 
     pub(crate) fn append_hyperlink_arg(&mut self, id: HyperlinkId, link: Link) {
         self.hyperlinks
             .get_mut(&id)
-            .unwrap()
+            .expect("hyperlink must exist")
             .args
             .push(RuleLink::from(&link, !self.head_parsed, !self.head_parsed));
     }
@@ -303,13 +299,15 @@ struct LinkInfo {
     this: RuleLinkArg,
     this_type: Option<ProcessConstraint>,
     opposite: RuleLinkArg,
+    span: Span,
 }
 
 impl Rule {
-    pub(crate) fn new(name: String, mem_id: MembraneId) -> Self {
+    pub(crate) fn new(name: String, mem_id: MembraneId, span: Span) -> Self {
         Self {
             name,
             parent: mem_id,
+            span,
             ..Default::default()
         }
     }
@@ -318,31 +316,34 @@ impl Rule {
         &self.atoms
     }
 
-    pub(crate) fn head_atoms(&self) -> HashMap<AtomId, &RuleAtom> {
+    pub(crate) fn get_atom(&self, id: AtomId) -> Option<&RuleAtom> {
+        self.atoms.get(&id)
+    }
+
+    pub(crate) fn contains_hyperlink(&self, id: HyperlinkId) -> bool {
+        self.hyperlinks.contains_key(&id)
+    }
+
+    pub(crate) fn head_atoms(&self) -> impl Iterator<Item = (AtomId, &RuleAtom)> + '_ {
         self.membranes[&self.head]
             .atoms
             .iter()
             .map(move |id| (*id, &self.atoms[id]))
-            .collect()
     }
 
-    pub(crate) fn var_atoms(&self) -> HashMap<AtomId, &RuleAtom> {
-        self.vars.iter().map(|(id, atom)| (*id, atom)).collect()
+    pub(crate) fn var_atoms(&self) -> impl Iterator<Item = (AtomId, &RuleAtom)> + '_ {
+        self.vars.iter().map(|(id, atom)| (*id, atom))
     }
 
-    pub(crate) fn body_atoms(&self) -> HashMap<AtomId, &RuleAtom> {
+    pub(crate) fn body_atoms(&self) -> impl Iterator<Item = (AtomId, &RuleAtom)> + '_ {
         self.membranes[&self.body]
             .atoms
             .iter()
             .map(move |id| (*id, &self.atoms[id]))
-            .collect()
     }
 
-    pub(crate) fn hyperlinks(&self) -> HashMap<HyperlinkId, &RuleHyperlink> {
-        self.hyperlinks
-            .iter()
-            .map(|(id, link)| (*id, link))
-            .collect()
+    pub(crate) fn hyperlinks(&self) -> impl Iterator<Item = (HyperlinkId, &RuleHyperlink)> + '_ {
+        self.hyperlinks.iter().map(|(id, link)| (*id, link))
     }
 
     pub(crate) fn is_in_head(&self, id: MembraneId) -> bool {
@@ -370,131 +371,112 @@ impl Rule {
 
     pub(super) fn solve(&mut self) -> SolveResult {
         let mut free = HashMap::new();
+        let mut result = SolveResult::default();
 
-        self.unification(self.head);
-
-        let head = self.head;
-        let mut res = self.solve_membrane(&head, &mut free, false);
+        self.apply_unification_pass(self.head);
+        result.combine(self.resolve_head_links(&mut free));
 
         if let Some(propagation) = self.propagation {
-            res.combine(self.solve_membrane(&propagation, &mut free, false));
+            result.combine(self.resolve_membrane_links(propagation, &mut free));
         }
 
-        self.solve_guard(&mut free);
+        result.combine(self.resolve_guard_types(&mut free));
+        result.combine(self.resolve_body_links(&mut free));
+        self.apply_unification_pass(self.body);
 
-        let body = self.body;
-        res.combine(self.solve_membrane(&body, &mut free, true));
-
-        self.unification(self.body);
-
-        if !free.is_empty() {
-            res.errors.push(TransformError::UnconstrainedLink);
+        for (link, info) in free {
+            result.errors.push(TransformError::UnconstrainedLink {
+                link,
+                span: info.span,
+            });
         }
 
-        res
+        result
     }
 
-    fn solve_membrane(
+    fn resolve_head_links(&mut self, free_links: &mut HashMap<String, LinkInfo>) -> SolveResult {
+        self.resolve_membrane_links(self.head, free_links)
+    }
+
+    fn resolve_body_links(&mut self, free_links: &mut HashMap<String, LinkInfo>) -> SolveResult {
+        self.resolve_membrane_links(self.body, free_links)
+    }
+
+    fn resolve_membrane_links(
         &mut self,
-        membrane_id: &MembraneId,
+        membrane_id: MembraneId,
         free_links: &mut HashMap<String, LinkInfo>,
-        body: bool,
     ) -> SolveResult {
-        let membrane = self.membranes.get_mut(membrane_id).unwrap().clone();
+        let child_membranes: Vec<_> = self.membranes[&membrane_id]
+            .membranes
+            .iter()
+            .copied()
+            .collect();
+        let atom_ids: Vec<_> = self.membranes[&membrane_id].atoms.iter().copied().collect();
+
         let mut result = SolveResult::default();
-        for mem in &membrane.membranes {
-            result.combine(self.solve_membrane(mem, free_links, body));
+        for mem in child_membranes {
+            result.combine(self.resolve_membrane_links(mem, free_links));
         }
 
-        // fix links
-
         let mut connected = HashSet::new();
-
-        // contains update info for links after solving
         let mut updates = vec![];
 
-        for atom_id in &membrane.atoms {
-            let atom = self.atoms.get_mut(atom_id).unwrap();
-            for link in atom.args.iter_mut() {
+        for atom_id in atom_ids {
+            let atom = self.atoms.get_mut(&atom_id).expect("atom must exist");
+            for link in &mut atom.args {
                 if let Some(id) = link.opposite.atom_id() {
                     if self.hyperlinks.contains_key(&id) {
                         link.opposite_type = Some(ProcessConstraint::Hyperlink);
                     }
-                } else {
-                    if let Some(var_id) = self.guard.defined(&link.name) {
-                        // create new atom for every variable
-                        let id = self.id_generator.next_atom_id(self.parent);
-                        let var = self.guard.get(var_id).unwrap();
-                        let name = if let Some(ty) = var.ty {
-                            match ty {
-                                ProcessConstraint::Int => "_int",
-                                ProcessConstraint::Float => "_float",
-                                ProcessConstraint::String => todo!(),
-                                _ => unreachable!(),
-                            }
-                        } else {
-                            &link.name
-                        };
-                        let atom = RuleAtom {
-                            parent: self.parent,
-                            name: name.to_string(),
-                            data: Data::Variable(var_id),
-                            type_: None,
-                            args: vec![],
-                        };
-                        self.var_atoms.entry(var_id).or_default().push(id);
-                        self.vars.insert(id, atom);
-                        link.opposite = RuleLinkArg::Temp(id, 0);
-                    }
-                    if connected.contains(&link.name) {
-                        // link with the same name already connected
-                        result.errors.push(TransformError::LinkTooManyOccurrence);
-                    } else if body {
-                        // handle constrainted links in body
-                        if let Some(cor_link) = free_links.get_mut(&link.name) {
-                            if cor_link.this_type.is_some() {
-                                link.opposite = cor_link.opposite;
-                            } else if let Some(other) = free_links.insert(
-                                link.name.clone(),
-                                LinkInfo {
-                                    this: link.opposite,
-                                    this_type: link.opposite_type,
-                                    opposite: link.this,
-                                },
-                            ) {
-                                updates.push((other.opposite, link.this));
-                                connected.insert(link.name.clone());
-                            }
-                        } else if let Some(other) = free_links.insert(
-                            link.name.clone(),
-                            LinkInfo {
-                                this: link.opposite,
-                                this_type: link.opposite_type,
-                                opposite: link.this,
-                            },
-                        ) {
-                            updates.push((other.opposite, link.this));
-                            connected.insert(link.name.clone());
+                    continue;
+                }
+
+                if let Some(var_id) = self.guard.defined(&link.name) {
+                    match Self::temp_atom_name_for_guard(&self.guard, self.span, &link.name, var_id)
+                    {
+                        Ok(name) => {
+                            let id = self.id_generator.next_atom_id(self.parent);
+                            let atom = RuleAtom {
+                                parent: self.parent,
+                                name,
+                                data: Data::Variable(var_id),
+                                span: link.span,
+                                type_: None,
+                                args: vec![],
+                            };
+                            self.var_atoms.entry(var_id).or_default().push(id);
+                            self.vars.insert(id, atom);
+                            link.opposite = RuleLinkArg::Temp(id, 0);
                         }
-                    } else {
-                        // link with the same name not connected
-                        if let Some(other) = free_links.insert(
-                            link.name.clone(),
-                            LinkInfo {
-                                this: link.opposite,
-                                this_type: link.opposite_type,
-                                opposite: link.this,
-                            },
-                        ) {
-                            updates.push((other.opposite, link.this));
-                            connected.insert(link.name.clone());
+                        Err(error) => {
+                            result.errors.push(error);
+                            continue;
                         }
                     }
                 }
+
+                if connected.contains(&link.name) {
+                    result.errors.push(TransformError::LinkTooManyOccurrence {
+                        link: link.name.clone(),
+                        span: link.span,
+                    });
+                    continue;
+                }
+
+                let new_info = LinkInfo {
+                    this: link.opposite,
+                    this_type: link.opposite_type,
+                    opposite: link.this,
+                    span: link.span,
+                };
+
+                if let Some(other) = free_links.insert(link.name.clone(), new_info) {
+                    updates.push((other.opposite, link.this));
+                    connected.insert(link.name.clone());
+                }
             }
         }
-
-        // remove free links from connected
 
         for name in connected {
             free_links.remove(&name);
@@ -502,11 +484,11 @@ impl Rule {
 
         for (from, to) in updates {
             if let Some((id, idx)) = from.id_index() {
-                let atom = self.atoms.get_mut(&id).unwrap();
+                let atom = self.atoms.get_mut(&id).expect("atom must exist");
                 atom.args[idx].opposite = to;
             }
             if let Some((id, idx)) = to.id_index() {
-                let atom = self.atoms.get_mut(&id).unwrap();
+                let atom = self.atoms.get_mut(&id).expect("atom must exist");
                 atom.args[idx].opposite = from;
             }
         }
@@ -514,8 +496,9 @@ impl Rule {
         result
     }
 
-    fn solve_guard(&mut self, free_links: &mut HashMap<String, LinkInfo>) {
+    fn resolve_guard_types(&mut self, free_links: &mut HashMap<String, LinkInfo>) -> SolveResult {
         let mut guard = self.guard.clone();
+        let mut result = SolveResult::default();
 
         for constraint in guard.constraints.iter_mut() {
             match constraint {
@@ -524,55 +507,77 @@ impl Rule {
                         if let GuardSource::Placeholder(name) = var {
                             if let Some(link) = free_links.get_mut(name) {
                                 if let Some((id, idx)) = link.opposite.id_index() {
-                                    let atom = self.atoms.get_mut(&id).unwrap();
+                                    let atom = self.atoms.get_mut(&id).expect("atom must exist");
                                     atom.args[idx].opposite_type = Some(*func);
                                     link.this_type = Some(*func);
                                     continue 'var;
                                 }
                             }
+                            result.errors.push(TransformError::UnconstrainedLink {
+                                link: name.clone(),
+                                span: self.span,
+                            });
                         }
                     }
                 }
                 GuardNode::Binary(op, lhs, rhs) => {
-                    let op = *op;
-                    _ = self.substitute_link_in_guard_with_type(lhs, &op.into(), free_links);
-                    _ = self.substitute_link_in_guard_with_type(rhs, &op.into(), free_links);
+                    let expected = (*op).into();
+                    if let Err(error) =
+                        self.substitute_link_in_guard_with_type(lhs, &expected, free_links)
+                    {
+                        result.errors.push(error);
+                    }
+                    if let Err(error) =
+                        self.substitute_link_in_guard_with_type(rhs, &expected, free_links)
+                    {
+                        result.errors.push(error);
+                    }
                 }
                 _ => {}
             }
         }
 
-        for def in guard.definitions.iter_mut() {
-            // do special handling for definitions with only one item
-            let var = def.1;
+        for var in guard.definitions.values_mut() {
             match &mut var.node {
-                GuardNode::Var(var) => {
-                    if let GuardSource::Placeholder(name) = var {
+                GuardNode::Var(var_source) => {
+                    if let GuardSource::Placeholder(name) = var_source {
                         if let Some(link) = free_links.get_mut(name) {
                             if let Some((id, idx)) = link.opposite.id_index() {
-                                *var = GuardSource::AtPortOfAtom(id, idx);
+                                *var_source = GuardSource::AtPortOfAtom(id, idx);
                             }
-                            continue; // continue to next definition, otherwise it is unconstrained
+                            continue;
                         }
-                        panic!("Unconstrained link in guard");
+                        result.errors.push(TransformError::UnconstrainedLink {
+                            link: name.clone(),
+                            span: self.span,
+                        });
                     }
                 }
                 GuardNode::Binary(op, lhs, rhs) => {
-                    let op = *op;
-                    let _left =
-                        self.substitute_link_in_guard_with_type(lhs, &op.into(), free_links);
-                    let _right =
-                        self.substitute_link_in_guard_with_type(rhs, &op.into(), free_links);
-                    var.ty = Some(op.into());
+                    let expected = (*op).into();
+                    if let Err(error) =
+                        self.substitute_link_in_guard_with_type(lhs, &expected, free_links)
+                    {
+                        result.errors.push(error);
+                    }
+                    if let Err(error) =
+                        self.substitute_link_in_guard_with_type(rhs, &expected, free_links)
+                    {
+                        result.errors.push(error);
+                    }
+                    var.ty = Some(expected);
                 }
                 GuardNode::Function(sig, args) => {
                     var.ty = Some(sig.ret);
-                    for arg in args {
-                        let _ =
-                            self.substitute_link_in_guard_with_type(arg, &sig.args[0], free_links);
+                    for (arg, arg_type) in args.iter_mut().zip(sig.args.iter().cycle()) {
+                        if let Err(error) =
+                            self.substitute_link_in_guard_with_type(arg, arg_type, free_links)
+                        {
+                            result.errors.push(error);
+                        }
                     }
                 }
-                GuardNode::Constraint(..) => unreachable!(),
+                GuardNode::Constraint(..) => {}
                 GuardNode::Int(_) => {
                     var.ty = Some(ProcessConstraint::Int);
                 }
@@ -583,6 +588,7 @@ impl Rule {
         }
 
         self.guard = guard;
+        result
     }
 
     fn substitute_link_in_guard_with_type(
@@ -590,20 +596,23 @@ impl Rule {
         node: &mut GuardNode,
         type_: &ProcessConstraint,
         free_links: &mut HashMap<String, LinkInfo>,
-    ) -> ProcessConstraint {
+    ) -> Result<ProcessConstraint, TransformError> {
         match node {
             GuardNode::Var(var) => {
                 let mut substitute = None;
                 match var {
                     GuardSource::AtPortOfAtom(atom_id, idx) => {
-                        let atom = self.atoms.get(atom_id).unwrap();
-                        let link = &atom.args[*idx];
+                        let link = &self.atoms[atom_id].args[*idx];
                         if let Some(opposite_type) = link.opposite_type {
                             if opposite_type != *type_ {
-                                panic!("Type mismatch in guard");
+                                return Err(TransformError::GuardTypeMismatch {
+                                    span: link.span,
+                                    expected: *type_,
+                                    found: opposite_type,
+                                });
                             }
                         } else {
-                            let atom = self.atoms.get_mut(atom_id).unwrap();
+                            let atom = self.atoms.get_mut(atom_id).expect("atom must exist");
                             atom.args[*idx].opposite_type = Some(*type_);
                             for link in free_links.values_mut() {
                                 if link.opposite == atom.args[*idx].this {
@@ -614,11 +623,15 @@ impl Rule {
                     }
                     GuardSource::Variable(def) => {
                         if let Some(atoms) = self.var_atoms.get(def) {
-                            for atom in atoms {
-                                let atom = self.atoms.get_mut(atom).unwrap();
-                                if let Some(opposite_type) = atom.type_ {
-                                    if opposite_type != *type_ {
-                                        panic!("Type mismatch in guard");
+                            for atom_id in atoms {
+                                let atom = self.atoms.get_mut(atom_id).expect("atom must exist");
+                                if let Some(existing_type) = atom.type_ {
+                                    if existing_type != *type_ {
+                                        return Err(TransformError::GuardTypeMismatch {
+                                            span: atom.span(),
+                                            expected: *type_,
+                                            found: existing_type,
+                                        });
                                     }
                                 } else {
                                     atom.type_ = Some(*type_);
@@ -629,18 +642,28 @@ impl Rule {
                     GuardSource::Placeholder(name) => {
                         if let Some(link) = free_links.get_mut(name) {
                             if let Some((id, idx)) = link.opposite.id_index() {
-                                let atom = self.atoms.get_mut(&id).unwrap();
+                                let atom = self.atoms.get_mut(&id).expect("atom must exist");
                                 atom.args[idx].opposite_type = Some(*type_);
                                 link.this_type = Some(*type_);
                                 substitute = Some(GuardSource::AtPortOfAtom(id, idx));
                             }
                         }
-                        for hl in self.hyperlinks.values() {
-                            if hl.name == *name {
-                                let op = hl.args[0].opposite;
-                                let (id, idx) = op.id_index().unwrap();
-                                substitute = Some(GuardSource::AtPortOfAtom(id, idx));
+                        if substitute.is_none() {
+                            for hl in self.hyperlinks.values() {
+                                if hl.name == *name {
+                                    let op = hl.args[0].opposite;
+                                    let (id, idx) =
+                                        op.id_index().expect("hyperlink should point to atom");
+                                    substitute = Some(GuardSource::AtPortOfAtom(id, idx));
+                                    break;
+                                }
                             }
+                        }
+                        if substitute.is_none() {
+                            return Err(TransformError::UnconstrainedLink {
+                                link: name.clone(),
+                                span: self.span,
+                            });
                         }
                     }
                 }
@@ -649,50 +672,54 @@ impl Rule {
                     *var = substitute;
                 }
 
-                *type_
+                Ok(*type_)
             }
-            GuardNode::Int(_) => ProcessConstraint::Int,
-            GuardNode::Float(_) => ProcessConstraint::Float,
-            GuardNode::Constraint(_, _) => {
-                unreachable!("Function in expression is not supported yet")
-            }
+            GuardNode::Int(_) => Ok(ProcessConstraint::Int),
+            GuardNode::Float(_) => Ok(ProcessConstraint::Float),
+            GuardNode::Constraint(_, _) => Ok(*type_),
             GuardNode::Binary(op, lhs, rhs) => {
-                let op = *op;
-                let lhs_type = self.substitute_link_in_guard_with_type(lhs, &op.into(), free_links);
-                let rhs_type = self.substitute_link_in_guard_with_type(rhs, &op.into(), free_links);
+                let expected = (*op).into();
+                let lhs_type =
+                    self.substitute_link_in_guard_with_type(lhs, &expected, free_links)?;
+                let rhs_type =
+                    self.substitute_link_in_guard_with_type(rhs, &expected, free_links)?;
                 if lhs_type != rhs_type {
-                    panic!("Type mismatch in guard");
+                    return Err(TransformError::GuardTypeMismatch {
+                        span: self.span,
+                        expected: lhs_type,
+                        found: rhs_type,
+                    });
                 }
-                lhs_type
+                Ok(lhs_type)
             }
             GuardNode::Function(sig, args) => {
-                for arg in args {
-                    let _ = self.substitute_link_in_guard_with_type(arg, &sig.args[0], free_links);
+                for (arg, arg_type) in args.iter_mut().zip(sig.args.iter().cycle()) {
+                    self.substitute_link_in_guard_with_type(arg, arg_type, free_links)?;
                 }
-                sig.ret
+                Ok(sig.ret)
             }
         }
     }
 
-    fn unification(&mut self, mem_id: MembraneId) {
-        let membrane = self.membranes.get(&mem_id).unwrap().clone();
-
-        for mem in &membrane.membranes {
-            self.unification(*mem);
+    fn apply_unification_pass(&mut self, mem_id: MembraneId) {
+        let child_membranes: Vec<_> = self.membranes[&mem_id].membranes.iter().copied().collect();
+        for mem in child_membranes {
+            self.apply_unification_pass(mem);
         }
 
+        let atom_ids: Vec<_> = self.membranes[&mem_id].atoms.iter().copied().collect();
         let mut connectors = vec![];
         let mut remove = vec![];
 
-        for atom_id in &membrane.atoms {
-            let atom = self.atoms.get(atom_id).unwrap();
+        for atom_id in atom_ids {
+            let atom = self.atoms.get(&atom_id).expect("atom must exist");
             if atom.name == "=" && atom.args.len() == 2 {
                 connectors.push(atom_id);
             }
         }
 
         for connector in &connectors {
-            let atom = self.atoms.get_mut(connector).unwrap();
+            let atom = self.atoms.get_mut(connector).expect("atom must exist");
             let left = atom.args[0].opposite;
             let left_type = atom.args[0].opposite_type;
             let right = atom.args[1].opposite;
@@ -700,17 +727,14 @@ impl Rule {
             let left_name = atom.args[0].name.clone();
             let right_name = atom.args[1].name.clone();
 
-            if atom.parent == self.body {
-                // in body but both sides are in head
-                if left.is_head() && right.is_head() {
-                    continue;
-                }
+            if atom.parent == self.body && left.is_head() && right.is_head() {
+                continue;
             }
 
             match (left.id_index(), right.id_index()) {
                 (Some((id, idx)), None) => {
                     if !self.vars.contains_key(&id) {
-                        let atom = self.atoms.get_mut(&id).unwrap();
+                        let atom = self.atoms.get_mut(&id).expect("atom must exist");
                         atom.args[idx].opposite = right;
                         atom.args[idx].opposite_type = right_type;
                         atom.args[idx].name = right_name;
@@ -718,7 +742,7 @@ impl Rule {
                 }
                 (None, Some((id, idx))) => {
                     if !self.vars.contains_key(&id) {
-                        let atom = self.atoms.get_mut(&id).unwrap();
+                        let atom = self.atoms.get_mut(&id).expect("atom must exist");
                         atom.args[idx].opposite = left;
                         atom.args[idx].opposite_type = left_type;
                         atom.args[idx].name = left_name;
@@ -726,13 +750,13 @@ impl Rule {
                 }
                 (Some((left_id, left_idx)), Some((right_id, right_idx))) => {
                     if !self.vars.contains_key(&left_id) {
-                        let left_atom = self.atoms.get_mut(&left_id).unwrap();
+                        let left_atom = self.atoms.get_mut(&left_id).expect("atom must exist");
                         left_atom.args[left_idx].opposite = right;
                         left_atom.args[left_idx].opposite_type = right_type;
                         left_atom.args[left_idx].name = right_name;
                     }
                     if !self.vars.contains_key(&right_id) {
-                        let right_atom = self.atoms.get_mut(&right_id).unwrap();
+                        let right_atom = self.atoms.get_mut(&right_id).expect("atom must exist");
                         right_atom.args[right_idx].opposite = left;
                         right_atom.args[right_idx].opposite_type = left_type;
                     }
@@ -743,12 +767,35 @@ impl Rule {
             remove.push(*connector);
         }
 
-        let membrane = self.membranes.get_mut(&mem_id).unwrap();
-
+        let membrane = self
+            .membranes
+            .get_mut(&mem_id)
+            .expect("membrane must exist");
         for connector in remove {
-            self.atoms.remove(connector);
-            membrane.atoms.remove(connector);
+            self.atoms.remove(&connector);
+            membrane.atoms.remove(&connector);
         }
+    }
+
+    fn temp_atom_name_for_guard(
+        guard: &Guard,
+        rule_span: Span,
+        link_name: &str,
+        variable_id: VariableId,
+    ) -> Result<String, TransformError> {
+        let variable = guard.get(variable_id).expect("guard variable must exist");
+        Ok(match variable.ty {
+            Some(ProcessConstraint::Int) => "_int".to_string(),
+            Some(ProcessConstraint::Float) => "_float".to_string(),
+            Some(ProcessConstraint::String) => "_string".to_string(),
+            Some(constraint) => {
+                return Err(TransformError::UnsupportedGuardConstraint {
+                    span: rule_span,
+                    constraint,
+                })
+            }
+            None => link_name.to_string(),
+        })
     }
 }
 

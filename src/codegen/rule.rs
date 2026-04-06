@@ -15,6 +15,8 @@ use crate::{
     },
 };
 
+use super::InitIR;
+
 #[derive(Debug)]
 pub struct Case {
     pub condition: Vec<LMNtalIR>,
@@ -35,13 +37,6 @@ pub struct RuleIR {
     pub name: String,
     pub pattern: Vec<LMNtalIR>,
     pub cases: Vec<Case>,
-}
-
-impl RuleIR {
-    /// Compiler hole, do not use
-    pub(crate) fn init(self) -> Vec<LMNtalIR> {
-        self.cases.into_iter().flat_map(|c| c.body).collect()
-    }
 }
 
 impl<'rule> RuleGenerator<'rule> {
@@ -72,6 +67,18 @@ impl<'rule> RuleGenerator<'rule> {
             name: self.rule.name.clone(),
             cases,
             pattern,
+        }
+    }
+
+    pub fn generate_init(&mut self) -> InitIR {
+        let case = generate_case(
+            self.rule,
+            &mut self.slot,
+            &mut self.symbol_table,
+            VecDeque::new(),
+        );
+        InitIR {
+            body: case.definition.into_iter().chain(case.body).collect(),
         }
     }
 }
@@ -116,11 +123,9 @@ fn generate_pattern(
     let mut queue = VecDeque::new();
     let mut atoms_to_be_different: HashMap<String, Vec<_>> = HashMap::new();
     let mut hyperlinks_to_be_different = HashMap::new();
-    let head = rule.head_atoms();
-    let hyperlinks = rule.hyperlinks();
     // zero incoming are starting points for every connected component
     for atom_id in zero_incoming {
-        let atom = head.get(&atom_id).unwrap();
+        let atom = rule.get_atom(atom_id).expect("head atom must exist");
         inst.push(LMNtalIR::FindAtom {
             id: *slot,
             name: atom.name().to_string(),
@@ -145,7 +150,7 @@ fn generate_pattern(
         *slot += 1;
         for (idx, arg) in atom.args().enumerate() {
             if let RuleLinkArg::Head(arg_id, _) = arg.opposite {
-                if hyperlinks.contains_key(&arg_id) {
+                if rule.contains_hyperlink(arg_id) {
                     inst.push(LMNtalIR::GetHyperlinkAtPort {
                         id: *slot,
                         from: symbol_table[&atom_id],
@@ -170,7 +175,7 @@ fn generate_pattern(
             if symbol_table.contains_key(&id) {
                 continue;
             }
-            if let Some(atom) = head.get(&id) {
+            if let Some(atom) = rule.get_atom(id) {
                 inst.push(LMNtalIR::GetAtomAtPort {
                     id: *slot,
                     from: symbol_table[&atom_id],
@@ -365,7 +370,7 @@ fn generate_case(
                     });
                 }
                 RuleLinkArg::Head(op, port) => {
-                    if rule.hyperlinks().contains_key(&op) {
+                    if rule.contains_hyperlink(op) {
                         link_queue.push({
                             LMNtalIR::LinkToHyperlink {
                                 atom: VarSource::Body(symbol_table[&this_id], this_port),
@@ -385,13 +390,13 @@ fn generate_case(
                 (RuleLinkArg::Head(_, _), RuleLinkArg::Head(_, _))
                 | (RuleLinkArg::Body(_, _), RuleLinkArg::Body(_, _)) => {}
                 (RuleLinkArg::Body(body_id, body_port), RuleLinkArg::Head(head_id, head_port)) => {
-                    if rule
-                        .all_atoms()
-                        .get(&head_id)
-                        .unwrap()
+                    let Some(head_atom) = rule.get_atom(head_id) else {
+                        continue;
+                    };
+                    if head_atom
                         .args()
                         .nth(head_port)
-                        .unwrap()
+                        .expect("head atom port must exist")
                         .opposite_type
                         .is_none()
                     {
@@ -457,7 +462,8 @@ fn create_link(link: &RuleLink, symbol_table: &HashMap<AtomId, usize>) -> Option
             if link.opposite_type.is_some() || link.opposite.is_body() {
                 None
             } else {
-                panic!("link {} is not constrained", link.name);
+                debug_assert!(false, "link {} is not constrained", link.name);
+                None
             }
         }
         (RuleLinkArg::Head(src, src_port), RuleLinkArg::Body(dst, dst_port)) => {
@@ -469,7 +475,8 @@ fn create_link(link: &RuleLink, symbol_table: &HashMap<AtomId, usize>) -> Option
         }
         (RuleLinkArg::Body(_, _), RuleLinkArg::Head(_, _)) => None, // ignore since it is already handled outside
         (RuleLinkArg::Body(_, _), RuleLinkArg::None) => {
-            panic!("link {} is not constrained", link.name);
+            debug_assert!(false, "link {} is not constrained", link.name);
+            None
         }
         (RuleLinkArg::Head(p1, idx1), RuleLinkArg::Head(p2, idx2)) => Some(LMNtalIR::Link {
             src: VarSource::Head(symbol_table[&p1], idx1),
@@ -505,7 +512,7 @@ fn transform_guard(
         GuardNode::Var(p) => match p {
             GuardSource::AtPortOfAtom(atom_id, port) => {
                 if rule.is_in_head(atom_id.parent()) {
-                    let atom = rule.all_atoms().get(atom_id).unwrap();
+                    let atom = rule.get_atom(*atom_id).expect("atom must exist");
                     let link = atom.args().nth(*port).unwrap();
                     Operation::Variable {
                         source: ir::VarSource::Head(symbol_table[atom_id], *port),

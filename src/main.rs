@@ -1,18 +1,11 @@
-use std::{
-    io::{self, Write},
-    path::PathBuf,
-};
+use std::{io, path::PathBuf};
 
 use clap::Parser;
 use lmntalc::{
-    analysis::analyze,
-    codegen::{Emitter, IRSet},
-    frontend::{lexing, parsing},
+    compiler::{compile_file, CompileOptions},
     report::Reporter,
-    target::{cpp::CppBackend, java::JavaBackend, python::PythonBackend, Backend, Target},
-    transform::transform_lmntal,
+    target::Target,
     tree_root,
-    util::Source,
 };
 use owo_colors::OwoColorize;
 
@@ -56,81 +49,43 @@ struct Cli {
 
 fn main() -> io::Result<()> {
     let cli = Cli::parse();
-    let path = &cli.source;
+    let compilation = compile_file(
+        &cli.source,
+        &CompileOptions {
+            target: (!cli.parse_only).then_some(cli.target),
+        },
+    )?;
 
-    if !path.exists() {
-        panic!("File not found: {}", path.display());
-    }
-    if !path.is_file() {
-        panic!("Not a file: {}", path.display());
-    }
-
-    let code = Source::from_file(&cli.source);
-    let lexer = lexing::Lexer::new(&code);
-    let parser = parsing::Parser::new();
-    let lex_res = lexer.lex();
-    lex_res.report(&code)?;
-    let res = parser.parse(lex_res.tokens);
-    res.report(&code)?;
-
-    let analysis_res = analyze(&res.root);
-    analysis_res.report(&code)?;
-
-    let transform_res = transform_lmntal(&res.root);
-
-    let mut gen = Emitter::new();
-    gen.generate(&transform_res.program);
-    let ir = gen.ir_set();
+    compilation.report(&compilation.source)?;
 
     if cli.dump_ast {
-        let t = tree_root(&res.root);
-        match t {
-            Ok(t) => println!("{}\n{}", "AST:".bold().underline(), t),
-            Err(e) => println!("{}", e),
+        if let Some(ast) = compilation.ast() {
+            match tree_root(ast) {
+                Ok(tree) => println!("{}\n{}", "AST:".bold().underline(), tree),
+                Err(error) => println!("{}", error),
+            }
         }
     }
 
     if cli.show_ir {
-        println!("{}\n{}", "Compiled IR:".bold().underline(), ir);
+        if let Some(ir) = compilation.ir() {
+            println!("{}\n{}", "Compiled IR:".bold().underline(), ir);
+        }
     }
 
-    if cli.parse_only {
+    if compilation.has_errors() || cli.parse_only {
         return Ok(());
     }
 
-    let output_file_name = if let Some(ref output_file_name) = cli.output {
-        output_file_name.clone()
-    } else {
-        let mut file_name = path.clone();
+    let output_file_name = cli.output.unwrap_or_else(|| {
+        let mut file_name = cli.source.clone();
         file_name.set_extension(cli.target.extension());
         file_name
-    };
+    });
 
-    let mut output_file = std::fs::File::create(output_file_name.clone())
-        .unwrap_or_else(|_| panic!("cannot create file {}", output_file_name.display()));
-
-    let code = match cli.target {
-        Target::Cpp => {
-            let mut backend = CppBackend::new();
-            output(&mut backend, ir, &cli)
-        }
-        Target::Python => {
-            let mut backend = PythonBackend::new();
-            output(&mut backend, ir, &cli)
-        }
-        Target::Java => {
-            let mut backend = JavaBackend::new();
-            output(&mut backend, ir, &cli)
-        }
-    };
-
-    output_file
-        .write_all(code.as_bytes())
-        .expect("cannot write file");
+    if let Some(code) = compilation.code {
+        std::fs::write(&output_file_name, code)?;
+    }
 
     Ok(())
-}
-
-fn output(backend: &mut impl Backend, ir_set: &IRSet, _arg: &Cli) -> String {
-    backend.pretty_print(ir_set)
 }

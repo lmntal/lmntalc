@@ -76,7 +76,11 @@ fn analyze_atom(atom: &Atom) -> ProcessAnalysisResult {
             Process::Membrane(mem) => {
                 errors.push(SemanticError::MembraneInAtomArgument { span: mem.span });
             }
-            _ => unreachable!(),
+            Process::Hyperlink(_)
+            | Process::ProcessContext(_)
+            | Process::RuleContext(_)
+            | Process::Rule(_)
+            | Process::LinkBundle(_) => {}
         }
     }
 

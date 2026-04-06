@@ -2,10 +2,12 @@ use std::{io, ops::Range};
 
 use crate::{
     analysis::{SemanticAnalysisResult, SemanticError, SemanticWarning},
+    compiler::Compilation,
     frontend::{
         lexing::{self, LexError, LexErrorType, LexingResult},
         parsing::{self, ParseError, ParseErrorType, ParseWarning, ParsingResult},
     },
+    transform::{TransformError, TransformResult, TransformWarning},
     util,
 };
 use ariadne::{Color, ColorGenerator, Fmt, Label, Report, Source};
@@ -37,6 +39,73 @@ pub trait Reporter<'src> {
         self.report_advices(source)?;
         self.report_warnings(source)?;
         self.report_errors(source)
+    }
+}
+
+impl<'src> Reporter<'src> for Compilation {
+    fn report_warnings(&self, source: &'src util::Source) -> io::Result<()> {
+        <LexingResult as Reporter<'src>>::report_warnings(&self.lexing, source)?;
+        if let Some(parsing) = &self.parsing {
+            <ParsingResult as Reporter<'src>>::report_warnings(parsing, source)?;
+        }
+        if let Some(analysis) = &self.analysis {
+            <SemanticAnalysisResult as Reporter<'src>>::report_warnings(analysis, source)?;
+        }
+        if let Some(transform) = &self.transform {
+            <TransformResult as Reporter<'src>>::report_warnings(transform, source)?;
+        }
+        Ok(())
+    }
+
+    fn report_errors(&self, source: &'src util::Source) -> io::Result<()> {
+        <LexingResult as Reporter<'src>>::report_errors(&self.lexing, source)?;
+        if let Some(parsing) = &self.parsing {
+            <ParsingResult as Reporter<'src>>::report_errors(parsing, source)?;
+        }
+        if let Some(analysis) = &self.analysis {
+            <SemanticAnalysisResult as Reporter<'src>>::report_errors(analysis, source)?;
+        }
+        if let Some(transform) = &self.transform {
+            <TransformResult as Reporter<'src>>::report_errors(transform, source)?;
+        }
+        if let Some(error) = &self.backend_error {
+            eprintln!("error: {}", error);
+        }
+        Ok(())
+    }
+}
+
+impl<'src> Reporter<'src> for TransformResult {
+    fn report_errors(&self, source: &'src util::Source) -> io::Result<()> {
+        for error in &self.errors {
+            let mut colors = ColorGenerator::new();
+            let mut report = Report::build(
+                ariadne::ReportKind::Error,
+                (source.name(), error.span().into()),
+            )
+            .with_message(error.message());
+            report = report.with_labels(error.labels(source, &mut colors));
+            report
+                .finish()
+                .eprint((source.name(), Source::from(source.source())))?;
+        }
+        Ok(())
+    }
+
+    fn report_warnings(&self, source: &'src util::Source) -> io::Result<()> {
+        for warning in &self.warnings {
+            let mut colors = ColorGenerator::new();
+            let mut report = Report::build(
+                ariadne::ReportKind::Warning,
+                (source.name(), warning.span().into()),
+            )
+            .with_message(warning.message());
+            report = report.with_labels(warning.labels(source, &mut colors));
+            report
+                .finish()
+                .eprint((source.name(), Source::from(source.source())))?;
+        }
+        Ok(())
     }
 }
 
@@ -216,6 +285,78 @@ impl Reportable for ParseWarning {
             }
             parsing::ParseWarningType::MissingPeriodAtTheEnd => {
                 "Missing period at the end of the process".to_string()
+            }
+        }
+    }
+}
+
+impl Reportable for TransformError {
+    fn labels<'a>(
+        &'a self,
+        source: &'a util::Source,
+        colors: &mut ColorGenerator,
+    ) -> Vec<Label<(&'a str, Range<usize>)>> {
+        vec![Label::new((source.name(), self.span().into()))
+            .with_message(self.message())
+            .with_color(colors.next())]
+    }
+
+    fn message(&self) -> String {
+        match self {
+            TransformError::TopLevelLink { .. } => "Top level link is not supported".to_string(),
+            TransformError::UnsupportedProcessContext { .. } => {
+                "Process contexts are not supported yet".to_string()
+            }
+            TransformError::UnsupportedRuleContext { .. } => {
+                "Rule contexts are not supported yet".to_string()
+            }
+            TransformError::UnsupportedNestedRule { .. } => {
+                "Rules inside membranes are not supported yet".to_string()
+            }
+            TransformError::UnsupportedProcessInAtom { process, .. } => {
+                format!("{} is not supported in atom arguments", process)
+            }
+            TransformError::UnsupportedGuard { message, .. } => message.clone(),
+            TransformError::UnknownGuardFunction { name, .. } => {
+                format!("Unknown guard function {}", name)
+            }
+            TransformError::UnsupportedGuardConstraint { constraint, .. } => {
+                format!(
+                    "Constraint {} is not supported by code generation yet",
+                    constraint
+                )
+            }
+            TransformError::UnconstrainedLink { link, .. } => {
+                format!("Link {} is unconstrained", link)
+            }
+            TransformError::LinkTooManyOccurrence { link, .. } => {
+                format!("Link {} occurs too many times", link)
+            }
+            TransformError::GuardTypeMismatch {
+                expected, found, ..
+            } => format!(
+                "Guard type mismatch: expected {}, found {}",
+                expected, found
+            ),
+        }
+    }
+}
+
+impl Reportable for TransformWarning {
+    fn labels<'a>(
+        &'a self,
+        source: &'a util::Source,
+        colors: &mut ColorGenerator,
+    ) -> Vec<Label<(&'a str, Range<usize>)>> {
+        vec![Label::new((source.name(), self.span().into()))
+            .with_message(self.message())
+            .with_color(colors.next())]
+    }
+
+    fn message(&self) -> String {
+        match self {
+            TransformWarning::UnusedVariable { name, .. } => {
+                format!("Guard variable {} is never used", name)
             }
         }
     }
