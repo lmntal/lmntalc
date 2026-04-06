@@ -7,7 +7,7 @@ use crate::{
 };
 
 use super::guard::{GuardNode, GuardSource, ProcessConstraint, VariableId};
-use super::{guard::Guard, Atom, Data, Link, Membrane};
+use super::{Atom, Data, Link, Membrane, guard::Guard};
 
 use super::id::*;
 
@@ -505,13 +505,13 @@ impl Rule {
                 GuardNode::Constraint(func, vars) => {
                     'var: for var in vars.iter_mut() {
                         if let GuardSource::Placeholder(name) = var {
-                            if let Some(link) = free_links.get_mut(name) {
-                                if let Some((id, idx)) = link.opposite.id_index() {
-                                    let atom = self.atoms.get_mut(&id).expect("atom must exist");
-                                    atom.args[idx].opposite_type = Some(*func);
-                                    link.this_type = Some(*func);
-                                    continue 'var;
-                                }
+                            if let Some(link) = free_links.get_mut(name)
+                                && let Some((id, idx)) = link.opposite.id_index()
+                            {
+                                let atom = self.atoms.get_mut(&id).expect("atom must exist");
+                                atom.args[idx].opposite_type = Some(*func);
+                                link.this_type = Some(*func);
+                                continue 'var;
                             }
                             result.errors.push(TransformError::UnconstrainedLink {
                                 link: name.clone(),
@@ -640,13 +640,13 @@ impl Rule {
                         }
                     }
                     GuardSource::Placeholder(name) => {
-                        if let Some(link) = free_links.get_mut(name) {
-                            if let Some((id, idx)) = link.opposite.id_index() {
-                                let atom = self.atoms.get_mut(&id).expect("atom must exist");
-                                atom.args[idx].opposite_type = Some(*type_);
-                                link.this_type = Some(*type_);
-                                substitute = Some(GuardSource::AtPortOfAtom(id, idx));
-                            }
+                        if let Some(link) = free_links.get_mut(name)
+                            && let Some((id, idx)) = link.opposite.id_index()
+                        {
+                            let atom = self.atoms.get_mut(&id).expect("atom must exist");
+                            atom.args[idx].opposite_type = Some(*type_);
+                            link.this_type = Some(*type_);
+                            substitute = Some(GuardSource::AtPortOfAtom(id, idx));
                         }
                         if substitute.is_none() {
                             for hl in self.hyperlinks.values() {
@@ -792,7 +792,7 @@ impl Rule {
                 return Err(TransformError::UnsupportedGuardConstraint {
                     span: rule_span,
                     constraint,
-                })
+                });
             }
             None => link_name.to_string(),
         })

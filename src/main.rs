@@ -2,7 +2,7 @@ use std::{io, path::PathBuf};
 
 use clap::Parser;
 use lmntalc::{
-    compiler::{compile_file, CompileOptions},
+    compiler::{CompileOptions, compile_file},
     report::Reporter,
     target::Target,
     tree_root,
@@ -58,19 +58,19 @@ fn main() -> io::Result<()> {
 
     compilation.report(&compilation.source)?;
 
-    if cli.dump_ast {
-        if let Some(ast) = compilation.ast() {
-            match tree_root(ast) {
-                Ok(tree) => println!("{}\n{}", "AST:".bold().underline(), tree),
-                Err(error) => println!("{}", error),
-            }
+    if cli.dump_ast
+        && let Some(ast) = compilation.ast()
+    {
+        match tree_root(ast) {
+            Ok(tree) => println!("{}\n{}", "AST:".bold().underline(), tree),
+            Err(error) => println!("{}", error),
         }
     }
 
-    if cli.show_ir {
-        if let Some(ir) = compilation.ir() {
-            println!("{}\n{}", "Compiled IR:".bold().underline(), ir);
-        }
+    if cli.show_ir
+        && let Some(ir) = compilation.ir()
+    {
+        println!("{}\n{}", "Compiled IR:".bold().underline(), ir);
     }
 
     if compilation.has_errors() || cli.parse_only {

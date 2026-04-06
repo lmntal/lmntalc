@@ -232,14 +232,14 @@ fn generate_case(
         for arg in atom.args() {
             match arg.opposite {
                 RuleLinkArg::None => {
-                    if let Some(ty) = arg.opposite_type {
-                        if ty != ProcessConstraint::Hyperlink {
-                            condition.push(LMNtalIR::CheckType {
-                                id: symbol_table[&atom_id],
-                                port: arg.this.index().unwrap(),
-                                ty,
-                            });
-                        }
+                    if let Some(ty) = arg.opposite_type
+                        && ty != ProcessConstraint::Hyperlink
+                    {
+                        condition.push(LMNtalIR::CheckType {
+                            id: symbol_table[&atom_id],
+                            port: arg.this.index().unwrap(),
+                            ty,
+                        });
                     }
                     remove_queue.push_front(LMNtalIR::RemoveAtomAt {
                         id: symbol_table[&atom_id],
@@ -303,31 +303,31 @@ fn generate_case(
                 let mut args = atom.args();
                 let arg1 = args.next().unwrap();
                 let arg2 = args.next().unwrap();
-                if let RuleLinkArg::Head(op1, _) = arg1.opposite {
-                    if let RuleLinkArg::Head(op2, _) = arg2.opposite {
-                        // fuse hyperlinks after all links are created, in case the atoms linked to the hyperlinks that are being fused
-                        remove_queue.push_back(LMNtalIR::FuseHyperlink {
-                            into: VarSource::Head(symbol_table[&op1], 0),
-                            from: VarSource::Head(symbol_table[&op2], 0),
-                        });
-                        skip.insert(atom_id);
-                        continue;
-                    }
+                if let RuleLinkArg::Head(op1, _) = arg1.opposite
+                    && let RuleLinkArg::Head(op2, _) = arg2.opposite
+                {
+                    // fuse hyperlinks after all links are created, in case the atoms linked to the hyperlinks that are being fused
+                    remove_queue.push_back(LMNtalIR::FuseHyperlink {
+                        into: VarSource::Head(symbol_table[&op1], 0),
+                        from: VarSource::Head(symbol_table[&op2], 0),
+                    });
+                    skip.insert(atom_id);
+                    continue;
                 }
             } else if atom.name() == "=" {
                 let mut args = atom.args();
                 let arg1 = args.next().unwrap();
                 let arg2 = args.next().unwrap();
-                if let RuleLinkArg::Head(atom1, port1) = arg1.opposite {
-                    if let RuleLinkArg::Head(atom2, port2) = arg2.opposite {
-                        // fuse hyperlinks after all links are created, in case the atoms linked to the hyperlinks that are being fused
-                        remove_queue.push_front(LMNtalIR::Unify {
-                            into: VarSource::Head(symbol_table[&atom1], port1),
-                            from: VarSource::Head(symbol_table[&atom2], port2),
-                        });
-                        skip.insert(atom_id);
-                        continue;
-                    }
+                if let RuleLinkArg::Head(atom1, port1) = arg1.opposite
+                    && let RuleLinkArg::Head(atom2, port2) = arg2.opposite
+                {
+                    // fuse hyperlinks after all links are created, in case the atoms linked to the hyperlinks that are being fused
+                    remove_queue.push_front(LMNtalIR::Unify {
+                        into: VarSource::Head(symbol_table[&atom1], port1),
+                        from: VarSource::Head(symbol_table[&atom2], port2),
+                    });
+                    skip.insert(atom_id);
+                    continue;
                 }
             }
         }
@@ -415,10 +415,10 @@ fn generate_case(
                     });
                 }
                 _ => {
-                    if let Some(id) = arg.opposite.atom_id() {
-                        if skip.contains(&id) {
-                            continue;
-                        }
+                    if let Some(id) = arg.opposite.atom_id()
+                        && skip.contains(&id)
+                    {
+                        continue;
                     }
                     if let Some(ir) = create_link(arg, symbol_table) {
                         link_queue.push(ir)

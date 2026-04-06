@@ -303,14 +303,14 @@ impl<'src> Lexer<'src> {
                         Ok(Token::new(span, s.parse::<f64>().unwrap()))
                     }
                     _ => {
-                        if let Some(c) = self.peek() {
-                            if c.is_ascii_alphabetic() {
-                                return Err(LexError {
-                                    pos: self.cur_pos(),
-                                    ty: LexErrorType::UncompleteNumber,
-                                    recoverable: None,
-                                });
-                            }
+                        if let Some(c) = self.peek()
+                            && c.is_ascii_alphabetic()
+                        {
+                            return Err(LexError {
+                                pos: self.cur_pos(),
+                                ty: LexErrorType::UncompleteNumber,
+                                recoverable: None,
+                            });
                         }
                         let s = self.take_while(|c| c.is_ascii_digit());
                         if s.is_empty() {
@@ -1046,18 +1046,18 @@ fn is_char(c: &str) -> Option<char> {
         }
     } else if chars.len() == 4 && chars[0] == '\\' {
         // ASCII escape characters (e.g. \x7f)
-        if let Ok(c) = u32::from_str_radix(&c[1..], 16) {
-            if let Some(c) = std::char::from_u32(c) {
-                return Some(c);
-            }
+        if let Ok(c) = u32::from_str_radix(&c[1..], 16)
+            && let Some(c) = std::char::from_u32(c)
+        {
+            return Some(c);
         }
         None
     } else if c.starts_with("\\u{") && c.ends_with('}') {
         let c = c.trim_start_matches("\\u{").trim_end_matches('}');
-        if let Ok(c) = u32::from_str_radix(c, 16) {
-            if let Some(c) = std::char::from_u32(c) {
-                return Some(c);
-            }
+        if let Ok(c) = u32::from_str_radix(c, 16)
+            && let Some(c) = std::char::from_u32(c)
+        {
+            return Some(c);
         }
         None
     } else {
