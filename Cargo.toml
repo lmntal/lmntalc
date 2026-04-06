@@ -2,15 +2,25 @@
 members = ["crates/lmntalc-core", "crates/lmntalc-ide"]
 resolver = "2"
 
+[workspace.package]
+version = "0.13.0"
+edition = "2024"
+license = "MIT"
+authors = ["QRWells <qirui.wang@moegi.waseda.jp>"]
+repository = "https://github.com/lmntal/lmntalc"
+
+[workspace.dependencies]
+lmntalc-core = { version = "0.13.0", path = "crates/lmntalc-core" }
+
 [package]
 name = "lmntalc"
-authors = ["QRWells <qirui.wang@moegi.waseda.jp>"]
-license = "MIT"
+authors.workspace = true
+license.workspace = true
 description = "A compiler for the LMNtal language"
 readme = "README.md"
-repository = "https://gitlab.ueda.info.waseda.ac.jp/wang/lmntalc"
-version = "0.12.0"
-edition = "2024"
+repository.workspace = true
+version.workspace = true
+edition.workspace = true
 
 [lib]
 name = "lmntalc"
@@ -24,6 +34,6 @@ doc = false
 [dependencies]
 ariadne = { version = "0.6", features = ["auto-color"] }
 clap = { version = "4.6", features = ["derive"] }
-lmntalc-core = { path = "crates/lmntalc-core" }
+lmntalc-core.workspace = true
 owo-colors = "4"
 termtree = "1.0"

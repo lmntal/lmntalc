@@ -215,7 +215,7 @@ checksum = "48f5d2a454e16a5ea0f4ced81bd44e4cfc7bd3a507b61887c99fd3538b28e4af"
 
 [[package]]
 name = "lmntalc"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "ariadne",
  "clap",
@@ -226,7 +226,7 @@ dependencies = [
 
 [[package]]
 name = "lmntalc-core"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "once_cell",
  "petgraph",
@@ -235,7 +235,7 @@ dependencies = [
 
 [[package]]
 name = "lmntalc-ide"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "lmntalc-core",
 ]

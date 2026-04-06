@@ -1,9 +1,11 @@
 [package]
 name = "lmntalc-core"
-version = "0.12.0"
-edition = "2024"
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 description = "Backend-neutral compiler core for lmntalc"
+authors.workspace = true
+repository.workspace = true
 
 [lib]
 name = "lmntalc_core"
