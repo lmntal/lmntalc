@@ -1,32 +1,33 @@
-/// This module contains the analyzer for LMNtal code.
-pub mod analysis;
-/// This module takes responsibility for the IR code generation.
-pub mod codegen;
 /// The high-level compilation pipeline and entrypoints.
 pub mod compiler;
-/// Includes the frontend for LMNtal code.
-///
-/// The frontend is responsible for parsing the input and transforming it into an AST.
-pub mod frontend;
-/// This module contains the IR for LMNtal code.
-pub mod ir;
-/// This module contains the data structures used to represent LMNtal code.
-///
-/// The AST will be transformed (see `tranform`) into these data structures, which are then
-/// used to generate the output.
-pub mod model;
+/// Debug and pretty-print helpers for CLI workflows.
+pub mod debug;
 /// This module contains the optimizer for LMNtal IR.
 pub mod optimization;
 /// This module contains the reporter for LMNtal code depending on `ariadne` crate.
 pub mod report;
 /// This module contains the backend for LMNtal code.
 pub mod target;
-/// Transforms the AST into a more usable form
-pub mod transform;
-/// Utilities for the compiler
-pub mod util;
 
-pub use frontend::ast::*;
-pub use frontend::lexing::Lexer as LMNtalLexer;
-pub use frontend::parsing::Parser as LMNtalParser;
-pub use frontend::token::Token;
+pub use debug::tree_root;
+pub use lmntalc_core::codegen;
+pub use lmntalc_core::diagnostics;
+pub use lmntalc_core::ir;
+pub use lmntalc_core::lowering;
+pub use lmntalc_core::model;
+pub use lmntalc_core::semantics;
+pub use lmntalc_core::syntax;
+pub use lmntalc_core::text;
+
+pub use lmntalc_core::lowering as transform;
+pub use lmntalc_core::semantics as analysis;
+pub use lmntalc_core::syntax as frontend;
+
+pub mod util {
+    pub use lmntalc_core::text::{Pos, Source, Span, Spanned};
+}
+
+pub use lmntalc_core::syntax::ast::*;
+pub use lmntalc_core::syntax::lexing::Lexer as LMNtalLexer;
+pub use lmntalc_core::syntax::parsing::Parser as LMNtalParser;
+pub use lmntalc_core::syntax::token::Token;

@@ -1,6 +1,7 @@
-use crate::frontend::token::Operator;
 use once_cell::sync::Lazy;
 use std::{collections::HashMap, fmt::Display};
+
+use crate::syntax::token::Operator;
 
 use super::id::AtomId;
 

@@ -1,0 +1,15 @@
+[package]
+name = "lmntalc-core"
+version = "0.12.0"
+edition = "2024"
+license = "MIT"
+description = "Backend-neutral compiler core for lmntalc"
+
+[lib]
+name = "lmntalc_core"
+path = "src/lib.rs"
+
+[dependencies]
+once_cell = "1.21"
+petgraph = { version = "0.8", features = ["serde-1"] }
+serde = { version = "1.0", features = ["derive"] }

@@ -1,4 +1,5 @@
 use clap::ValueEnum;
+use lmntalc_core::diagnostics::{Diagnostic, DiagnosticStage};
 
 use crate::{codegen::IRSet, model::guard::ProcessConstraint};
 
@@ -86,6 +87,12 @@ impl std::fmt::Display for BackendError {
 }
 
 impl std::error::Error for BackendError {}
+
+impl BackendError {
+    pub fn diagnostic(&self) -> Diagnostic {
+        Diagnostic::error(DiagnosticStage::Backend, self.to_string(), None)
+    }
+}
 
 pub trait Backend {
     fn new() -> Self;

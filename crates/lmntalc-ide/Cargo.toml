@@ -1,0 +1,13 @@
+[package]
+name = "lmntalc-ide"
+version = "0.12.0"
+edition = "2024"
+license = "MIT"
+description = "IDE-oriented document/session APIs for lmntalc"
+
+[lib]
+name = "lmntalc_ide"
+path = "src/lib.rs"
+
+[dependencies]
+lmntalc-core = { path = "../lmntalc-core" }

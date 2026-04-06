@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
-use crate::util::Span;
+use crate::text::Span;
 
 /// Tokens in LMNtal.
 #[derive(Clone, Debug, Serialize, Deserialize)]

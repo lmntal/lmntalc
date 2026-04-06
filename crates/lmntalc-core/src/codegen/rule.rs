@@ -3,7 +3,6 @@ use std::{
     fmt::Display,
 };
 
-use owo_colors::OwoColorize;
 use petgraph::{stable_graph::StableDiGraph, visit::IntoNodeReferences};
 
 use crate::{
@@ -559,18 +558,13 @@ fn transform_guard(
 
 impl Display for RuleIR {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(
-            f,
-            "{}\t{}",
-            "Rule".underline().bold().blue(),
-            self.name.bold()
-        )?;
-        writeln!(f, "{}", "pattern".underline().bright_blue())?;
+        writeln!(f, "Rule\t{}", self.name)?;
+        writeln!(f, "pattern")?;
         for ir in &self.pattern {
             writeln!(f, "\t{}", ir)?;
         }
         for case in &self.cases {
-            writeln!(f, "{}", "case".underline().bright_blue())?;
+            writeln!(f, "case")?;
             for ir in &case.condition {
                 writeln!(f, " \t{}", ir)?;
             }

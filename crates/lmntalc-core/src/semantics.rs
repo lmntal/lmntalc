@@ -1,6 +1,6 @@
 pub mod process;
 
-use crate::{util::Span, Membrane};
+use crate::{syntax::ast::Membrane, text::Span};
 
 use self::process::analyze_membrane;
 

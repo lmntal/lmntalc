@@ -1,12 +1,15 @@
 use std::collections::HashMap;
 
 use crate::{
-    frontend::{ast::AtomName, token::Operator},
     model::{
         guard::{Guard, GuardNode, GuardSource, ProcessConstraint, VariableId, RESERVED_FUNC},
         rule::Rule,
     },
-    FunctorName, Process, ProcessList,
+    syntax::{
+        ast::{AtomName, FunctorName, Process, ProcessList},
+        token::Operator,
+    },
+    text::Span,
 };
 
 use super::TransformError;
@@ -214,10 +217,7 @@ fn is_supported_guard_operator(op: Operator) -> bool {
     )
 }
 
-fn constraint_from_keyword(
-    s: &str,
-    span: crate::util::Span,
-) -> Result<ProcessConstraint, TransformError> {
+fn constraint_from_keyword(s: &str, span: Span) -> Result<ProcessConstraint, TransformError> {
     let constraint = match s {
         "int" => ProcessConstraint::Int,
         "float" => ProcessConstraint::Float,

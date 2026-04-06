@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 
 use crate::{
-    transform::{SolveResult, TransformError},
-    util::Span,
+    lowering::{SolveResult, TransformError},
+    text::Span,
 };
 
 use super::guard::{GuardNode, GuardSource, ProcessConstraint, VariableId};

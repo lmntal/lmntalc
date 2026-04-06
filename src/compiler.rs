@@ -1,13 +1,15 @@
 use std::{io, path::Path};
 
-use crate::{
-    analysis::{analyze, SemanticAnalysisResult},
+use lmntalc_core::{
     codegen::{Emitter, IRSet},
-    frontend::{lexing, parsing},
-    target::{BackendError, Target},
-    transform::TransformResult,
-    util::Source,
+    diagnostics::{Diagnostic, DiagnosticSeverity},
+    lowering::{self, TransformResult},
+    semantics::{analyze, SemanticAnalysisResult},
+    syntax::{lexing, parsing},
+    text::Source,
 };
+
+use crate::target::{BackendError, Target};
 
 #[derive(Default)]
 pub struct CompileOptions {
@@ -27,7 +29,7 @@ pub struct Compilation {
 }
 
 impl Compilation {
-    pub fn ast(&self) -> Option<&crate::Membrane> {
+    pub fn ast(&self) -> Option<&lmntalc_core::syntax::ast::Membrane> {
         self.parsing.as_ref().map(|parsing| &parsing.root)
     }
 
@@ -36,20 +38,26 @@ impl Compilation {
     }
 
     pub fn has_errors(&self) -> bool {
-        !self.lexing.errors.is_empty()
-            || self
-                .parsing
-                .as_ref()
-                .is_some_and(|parsing| !parsing.parsing_errors.is_empty())
-            || self
-                .analysis
-                .as_ref()
-                .is_some_and(|analysis| !analysis.errors.is_empty())
-            || self
-                .transform
-                .as_ref()
-                .is_some_and(|transform| !transform.errors.is_empty())
-            || self.backend_error.is_some()
+        self.diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+    }
+
+    pub fn diagnostics(&self) -> Vec<Diagnostic> {
+        let mut diagnostics = self.lexing.diagnostics();
+        if let Some(parsing) = &self.parsing {
+            diagnostics.extend(parsing.diagnostics());
+        }
+        if let Some(analysis) = &self.analysis {
+            diagnostics.extend(analysis.diagnostics());
+        }
+        if let Some(transform) = &self.transform {
+            diagnostics.extend(transform.diagnostics());
+        }
+        if let Some(error) = &self.backend_error {
+            diagnostics.push(error.diagnostic());
+        }
+        diagnostics
     }
 }
 
@@ -103,7 +111,7 @@ pub fn compile_source(source: Source, options: &CompileOptions) -> Compilation {
         };
     }
 
-    let transform = crate::transform::transform_lmntal(&parsing.root);
+    let transform = lowering::transform_lmntal(&parsing.root);
     if !transform.errors.is_empty() {
         return Compilation {
             source,
@@ -145,6 +153,7 @@ pub fn compile_source(source: Source, options: &CompileOptions) -> Compilation {
 mod tests {
     use super::*;
     use crate::{ir::LMNtalIR, transform::TransformError};
+    use lmntalc_core::diagnostics::DiagnosticStage;
 
     fn compile_text(source: &str, target: Option<Target>) -> Compilation {
         compile_source(
@@ -253,5 +262,51 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn diagnostics_include_lexing_stage_information() {
+        let compilation = compile_text("\"unterminated", None);
+        let diagnostics = compilation.diagnostics();
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.stage == DiagnosticStage::Lexing
+                && diagnostic.primary_span.is_some()
+                && !diagnostic.message.is_empty()
+        }));
+    }
+
+    #[test]
+    fn diagnostics_include_parsing_stage_information() {
+        let compilation = compile_text("a :-", None);
+        let diagnostics = compilation.diagnostics();
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.stage == DiagnosticStage::Parsing
+                && diagnostic.primary_span.is_some()
+                && !diagnostic.message.is_empty()
+        }));
+    }
+
+    #[test]
+    fn diagnostics_include_semantic_stage_information() {
+        let compilation = compile_text("a(X).", None);
+        let diagnostics = compilation.diagnostics();
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.stage == DiagnosticStage::Semantics
+                && diagnostic.primary_span.is_some()
+                && diagnostic.message.contains("Free link X is not allowed")
+        }));
+    }
+
+    #[test]
+    fn diagnostics_include_lowering_stage_information() {
+        let compilation = compile_text("a(X) :- ground(X) | b(X).", None);
+        let diagnostics = compilation.diagnostics();
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.stage == DiagnosticStage::Lowering
+                && diagnostic.primary_span.is_some()
+                && diagnostic
+                    .message
+                    .contains("Constraint ground is not supported by code generation yet")
+        }));
     }
 }

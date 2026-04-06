@@ -1,19 +1,27 @@
 use std::{cell::Cell, fmt::Display};
 
 use crate::{
-    frontend::{
+    syntax::{
         ast::AtomName,
         lexing::Lexer,
         token::{Operator, Token, TokenKind},
     },
-    util::{OneOf, Pos, Source, Span},
-    FunctorName, LinkBundle, RuleContext,
+    text::{Pos, Source, Span},
 };
 
 use super::{
-    ast::{Atom, Hyperlink, Link, Membrane, Process, ProcessContext, ProcessList, Rule},
+    ast::{
+        Atom, FunctorName, Hyperlink, Link, LinkBundle, Membrane, Process, ProcessContext,
+        ProcessList, Rule, RuleContext,
+    },
     token::Number,
 };
+
+#[derive(Debug)]
+enum OneOf<T1, T2> {
+    Left(T1),
+    Right(T2),
+}
 
 /// A parser for LMNtal source code
 #[derive(Debug, Default)]

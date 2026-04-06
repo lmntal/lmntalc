@@ -1,6 +1,6 @@
 use crate::{
-    frontend::token::{Operator, Token, TokenKind},
-    util::{Pos, Source, Span},
+    syntax::token::{Operator, Token, TokenKind},
+    text::{Pos, Source, Span},
 };
 
 /// A lexer for LMNtal.
@@ -1097,7 +1097,7 @@ fn test_lexing_number() {
         };
     }
 
-    use crate::frontend::token::Number;
+    use crate::syntax::token::Number;
 
     test_number!("0".to_owned(), TokenKind::Number(Number::Decimal(0)));
     test_number!("0.".to_owned(), TokenKind::Number(Number::Decimal(0))); // the dot is not consumed

@@ -1,11 +1,9 @@
 use std::fmt::Display;
 
 use crate::{
-    frontend::token::Operator,
     model::{guard::ProcessConstraint, Data},
+    syntax::token::Operator,
 };
-
-use owo_colors::OwoColorize;
 
 /// Basic operations of LMNtal
 #[derive(Debug, Clone)]
@@ -144,13 +142,10 @@ impl Display for LMNtalIR {
                 write!(
                     f,
                     "create atom at {} with name: {} arity: {} data: {}",
-                    id.underline().bold(),
-                    name,
-                    arity,
-                    data
+                    id, name, arity, data
                 )
             }
-            LMNtalIR::RemoveAtom { id } => write!(f, "remove atom at {}", id.underline().bold()),
+            LMNtalIR::RemoveAtom { id } => write!(f, "remove atom at {}", id),
             LMNtalIR::CloneAtom {
                 id,
                 from_id,
@@ -159,9 +154,7 @@ impl Display for LMNtalIR {
                 write!(
                     f,
                     "clone atom into {} from {} port {} ",
-                    id.underline().bold(),
-                    from_id,
-                    from_port
+                    id, from_id, from_port
                 )
             }
             LMNtalIR::Link { src, dst } => write!(f, "link {} with {}", src, dst,),
@@ -172,9 +165,7 @@ impl Display for LMNtalIR {
                 write!(
                     f,
                     "find_atom into {} with name: {} arity: {}",
-                    id.underline().bold(),
-                    name,
-                    arity
+                    id, name, arity
                 )
             }
             LMNtalIR::GetAtomAtPort {
@@ -186,24 +177,16 @@ impl Display for LMNtalIR {
             } => write!(
                 f,
                 "get atom into {} from {} port {} with name: {} arity: {}",
-                id.underline().bold(),
-                from.underline().bold(),
-                port,
-                name,
-                arity
+                id, from, port, name, arity
             ),
-            LMNtalIR::GetHyperlinkAtPort { id, from, port } => write!(
-                f,
-                "get hyperlink into {} from {} port {}",
-                id.underline().bold(),
-                from.underline().bold(),
-                port,
-            ),
+            LMNtalIR::GetHyperlinkAtPort { id, from, port } => {
+                write!(f, "get hyperlink into {} from {} port {}", id, from, port,)
+            }
             LMNtalIR::AtomEqualityIdPort { id_port_list, eq } => {
                 let predicate = if *eq { "are" } else { "are not" };
                 write!(f, "atoms {} equal:\n\t\t", predicate)?;
                 for (id, port) in id_port_list {
-                    write!(f, "at {} port {},", id.underline().bold(), port)?;
+                    write!(f, "at {} port {},", id, port)?;
                 }
                 Ok(())
             }
@@ -216,38 +199,22 @@ impl Display for LMNtalIR {
                 let predicate = if *eq { "are" } else { "are not" };
                 write!(f, "{} {} equal:\n\t\t", content, predicate)?;
                 for id in id_list {
-                    write!(f, "at {},", id.underline().bold())?;
+                    write!(f, "at {},", id)?;
                 }
                 Ok(())
             }
-            LMNtalIR::CheckType { id, port, ty } => write!(
-                f,
-                "check type at {} port {} is {}",
-                id.underline().bold(),
-                port,
-                ty
-            ),
+            LMNtalIR::CheckType { id, port, ty } => {
+                write!(f, "check type at {} port {} is {}", id, port, ty)
+            }
             LMNtalIR::CheckValue(op) => write!(f, "check if {}", op),
             LMNtalIR::DefineTempVar { id, name, ty, op } => {
-                write!(
-                    f,
-                    "define a temp var at {} {} {} {}",
-                    id.underline().bold(),
-                    name,
-                    ty,
-                    op
-                )
+                write!(f, "define a temp var at {} {} {} {}", id, name, ty, op)
             }
             LMNtalIR::RemoveAtomAt { id, port } => {
-                write!(f, "remove atom at {} port {}", id.underline().bold(), port)
+                write!(f, "remove atom at {} port {}", id, port)
             }
             LMNtalIR::CreateHyperlink { id, name } => {
-                write!(
-                    f,
-                    "create hyperlink at {} with name: {}",
-                    id.underline().bold(),
-                    name,
-                )
+                write!(f, "create hyperlink at {} with name: {}", id, name,)
             }
             LMNtalIR::LinkToHyperlink { atom, hyperlink } => {
                 write!(f, "add atom {} to hyperlink {}", atom, hyperlink)
@@ -285,9 +252,9 @@ impl VarSource {
 impl Display for VarSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            VarSource::Head(id, port) => write!(f, "head {} port {}", id.underline().bold(), port),
-            VarSource::Variable(id) => write!(f, "temp {}", id.underline().bold()),
-            VarSource::Body(id, port) => write!(f, "body {} port {}", id.underline().bold(), port),
+            VarSource::Head(id, port) => write!(f, "head {} port {}", id, port),
+            VarSource::Variable(id) => write!(f, "temp {}", id),
+            VarSource::Body(id, port) => write!(f, "body {} port {}", id, port),
         }
     }
 }
@@ -321,25 +288,11 @@ impl Display for Operation {
             Operation::Literal(l) => write!(f, "{}", l),
             Operation::Variable { source, ty_ } => match source {
                 VarSource::Head(id, port) => {
-                    write!(
-                        f,
-                        "(var at {} port {} with type {})",
-                        id.underline().bold(),
-                        port,
-                        ty_
-                    )
+                    write!(f, "(var at {} port {} with type {})", id, port, ty_)
                 }
-                VarSource::Variable(id) => {
-                    write!(f, "(var at {} with type {})", id.underline().bold(), ty_)
-                }
+                VarSource::Variable(id) => write!(f, "(var at {} with type {})", id, ty_),
                 VarSource::Body(id, port) => {
-                    write!(
-                        f,
-                        "(var at {} port {} with type {})",
-                        id.underline().bold(),
-                        port,
-                        ty_
-                    )
+                    write!(f, "(var at {} port {} with type {})", id, port, ty_)
                 }
             },
             Operation::BinaryOP { op, lhs, rhs } => write!(f, "({} {} {})", lhs, op, rhs),

@@ -2,8 +2,6 @@ pub mod rule;
 
 use std::{collections::HashMap, fmt::Display};
 
-use owo_colors::OwoColorize;
-
 use crate::{ir::LMNtalIR, model::Program};
 
 use self::rule::{RuleGenerator, RuleIR};
@@ -71,11 +69,11 @@ impl Emitter {
 
 impl Display for IRSet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "{}", "Init".bold().underline().red())?;
+        writeln!(f, "Init")?;
         for ir in &self.init.body {
             writeln!(f, "\t{}", ir)?;
         }
-        writeln!(f, "{}", "Rules".bold().underline().red())?;
+        writeln!(f, "Rules")?;
         for rule in &self.rules {
             writeln!(f, "{}", rule)?;
         }

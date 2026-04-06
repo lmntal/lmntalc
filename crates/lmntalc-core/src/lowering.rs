@@ -1,14 +1,20 @@
 mod guard;
 
 use crate::{
-    frontend::ast::AtomName,
-    model::{guard::ProcessConstraint, rule::Rule, *},
-    ProcessList,
+    model::{
+        guard::ProcessConstraint,
+        id::{AtomId, MembraneId},
+        rule::Rule,
+        Atom, Data, Link, Membrane, Process, Program,
+    },
+    syntax::ast::{
+        Atom as AstAtom, AtomName, Membrane as AstMembrane, Process as AstProcess, ProcessList,
+        Rule as AstRule,
+    },
+    text::Span,
 };
 
 use self::guard::visit_guard;
-use super::model::id::*;
-use super::util::Span;
 
 #[derive(Debug, Clone)]
 pub enum TransformError {
@@ -107,7 +113,7 @@ impl TransformWarning {
 }
 
 /// Transform LMNtal source code into a membrane (initial membrane)
-pub fn transform_lmntal(ast: &crate::Membrane) -> TransformResult {
+pub fn transform_lmntal(ast: &AstMembrane) -> TransformResult {
     let mut program = Program::default();
     let mut errors = vec![];
     let mut warnings = vec![];
@@ -155,7 +161,7 @@ pub fn transform_lmntal(ast: &crate::Membrane) -> TransformResult {
 }
 
 /// Visit a rule node and transform it into a `Rule` struct
-fn visit_rule(node: &crate::Rule, mem_id: MembraneId, errors: &mut Vec<TransformError>) -> Rule {
+fn visit_rule(node: &AstRule, mem_id: MembraneId, errors: &mut Vec<TransformError>) -> Rule {
     // keep only letters and underlscore in the name
     let mut name = node.name.0.clone();
     name.retain(|c| c.is_alphanumeric() || c == '_');
@@ -209,38 +215,38 @@ fn visit_process_list(
 }
 
 fn visit_process(
-    node: &crate::Process,
+    node: &AstProcess,
     store: &mut Rule,
     processes: &mut Vec<Process>,
     mem_id: MembraneId,
     errors: &mut Vec<TransformError>,
 ) {
     match node {
-        crate::Process::Atom(atom) => {
+        AstProcess::Atom(atom) => {
             _ = visit_atom(atom, store, processes, mem_id, errors);
         }
-        crate::Process::Membrane(mem) => {
+        AstProcess::Membrane(mem) => {
             let id = visit_membrane(mem, store, mem_id, errors);
             processes.push(Process::Membrane(id));
         }
-        crate::Process::Link(link) => {
+        AstProcess::Link(link) => {
             errors.push(TransformError::TopLevelLink { span: link.span });
         }
-        crate::Process::ProcessContext(context) => {
+        AstProcess::ProcessContext(context) => {
             errors.push(TransformError::UnsupportedProcessContext { span: context.span });
         }
-        crate::Process::RuleContext(context) => {
+        AstProcess::RuleContext(context) => {
             errors.push(TransformError::UnsupportedRuleContext { span: context.span });
         }
-        crate::Process::Rule(rule) => {
+        AstProcess::Rule(rule) => {
             errors.push(TransformError::UnsupportedNestedRule { span: rule.span });
         }
-        crate::Process::Hyperlink(hyperlink) => {
+        AstProcess::Hyperlink(hyperlink) => {
             let name = format!("!{}", hyperlink.name.0);
             let hl_id = store.add_hyperlink(&name, hyperlink.span);
             processes.push(Process::Hyperlink(hl_id));
         }
-        crate::Process::LinkBundle(bundle) => {
+        AstProcess::LinkBundle(bundle) => {
             errors.push(TransformError::UnsupportedProcessInAtom {
                 span: bundle.span,
                 process: "link bundle".to_string(),
@@ -253,7 +259,7 @@ fn visit_process(
 ///
 /// Returns the index of the atom in the holder
 fn visit_atom(
-    node: &crate::Atom,
+    node: &AstAtom,
     rule: &mut Rule,
     processes: &mut Vec<Process>,
     mem_id: MembraneId,
@@ -276,7 +282,7 @@ fn visit_atom(
 
     for (idx, arg) in args.iter().enumerate() {
         match arg {
-            crate::Process::Atom(inner_atom) => {
+            AstProcess::Atom(inner_atom) => {
                 let inner_atom_id = visit_atom(inner_atom, rule, processes, mem_id, errors);
                 let temp_name = rule.temp_link_name();
 
@@ -299,7 +305,7 @@ fn visit_atom(
 
                 links.push(link);
             }
-            crate::Process::Hyperlink(hyperlink) => {
+            AstProcess::Hyperlink(hyperlink) => {
                 let name = format!("!{}", hyperlink.name.0);
                 let hl_id = rule.add_hyperlink(&name, hyperlink.span);
                 let temp_name = rule.temp_link_name();
@@ -324,7 +330,7 @@ fn visit_atom(
 
                 links.push(link);
             }
-            crate::Process::Link(link) => {
+            AstProcess::Link(link) => {
                 let link = Link {
                     name: link.name.clone(),
                     this: (id, idx),
@@ -358,7 +364,7 @@ fn visit_atom(
 ///
 /// Returns the index of the membrane in the holder
 fn visit_membrane(
-    node: &crate::Membrane,
+    node: &AstMembrane,
     store: &mut Rule,
     mem_id: MembraneId,
     errors: &mut Vec<TransformError>,

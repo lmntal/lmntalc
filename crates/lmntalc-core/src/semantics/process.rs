@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use crate::{util::Span, Atom, Membrane, Process, ProcessList};
+use crate::{
+    syntax::ast::{Atom, Membrane, Process, ProcessList},
+    text::Span,
+};
 
 use super::{SemanticError, SemanticWarning};
 

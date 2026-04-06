@@ -8,11 +8,11 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use crate::{transform::SolveResult, util::Span};
+use crate::{lowering::SolveResult, text::Span};
 
 use self::{guard::VariableId, rule::Rule};
 
-use id::*;
+use self::id::*;
 
 #[derive(Debug, Default)]
 pub struct Program {

@@ -1,446 +1,48 @@
 use std::{io, ops::Range};
 
-use crate::{
-    analysis::{SemanticAnalysisResult, SemanticError, SemanticWarning},
-    compiler::Compilation,
-    frontend::{
-        lexing::{self, LexError, LexErrorType, LexingResult},
-        parsing::{self, ParseError, ParseErrorType, ParseWarning, ParsingResult},
-    },
-    transform::{TransformError, TransformResult, TransformWarning},
-    util,
+use ariadne::{ColorGenerator, Label, Report, Source as AriadneSource};
+use lmntalc_core::{
+    diagnostics::{Diagnostic, DiagnosticSeverity},
+    text::Source,
 };
-use ariadne::{Color, ColorGenerator, Fmt, Label, Report, Source};
 
-pub trait Reportable {
-    fn labels<'a>(
-        &'a self,
-        source: &'a util::Source,
-        colors: &mut ColorGenerator,
-    ) -> Vec<Label<(&'a str, Range<usize>)>>;
-    fn message(&self) -> String;
-}
+use crate::compiler::Compilation;
 
-#[allow(unused_variables)]
 pub trait Reporter<'src> {
-    fn report_advices(&self, source: &'src util::Source) -> io::Result<()> {
-        Ok(())
-    }
-
-    fn report_warnings(&self, source: &'src util::Source) -> io::Result<()> {
-        Ok(())
-    }
-
-    fn report_errors(&self, source: &'src util::Source) -> io::Result<()> {
-        Ok(())
-    }
-
-    fn report(&self, source: &'src util::Source) -> io::Result<()> {
-        self.report_advices(source)?;
-        self.report_warnings(source)?;
-        self.report_errors(source)
-    }
+    fn report(&self, source: &'src Source) -> io::Result<()>;
 }
 
 impl<'src> Reporter<'src> for Compilation {
-    fn report_warnings(&self, source: &'src util::Source) -> io::Result<()> {
-        <LexingResult as Reporter<'src>>::report_warnings(&self.lexing, source)?;
-        if let Some(parsing) = &self.parsing {
-            <ParsingResult as Reporter<'src>>::report_warnings(parsing, source)?;
-        }
-        if let Some(analysis) = &self.analysis {
-            <SemanticAnalysisResult as Reporter<'src>>::report_warnings(analysis, source)?;
-        }
-        if let Some(transform) = &self.transform {
-            <TransformResult as Reporter<'src>>::report_warnings(transform, source)?;
-        }
-        Ok(())
-    }
-
-    fn report_errors(&self, source: &'src util::Source) -> io::Result<()> {
-        <LexingResult as Reporter<'src>>::report_errors(&self.lexing, source)?;
-        if let Some(parsing) = &self.parsing {
-            <ParsingResult as Reporter<'src>>::report_errors(parsing, source)?;
-        }
-        if let Some(analysis) = &self.analysis {
-            <SemanticAnalysisResult as Reporter<'src>>::report_errors(analysis, source)?;
-        }
-        if let Some(transform) = &self.transform {
-            <TransformResult as Reporter<'src>>::report_errors(transform, source)?;
-        }
-        if let Some(error) = &self.backend_error {
-            eprintln!("error: {}", error);
+    fn report(&self, source: &'src Source) -> io::Result<()> {
+        for diagnostic in self.diagnostics() {
+            render_diagnostic(source, &diagnostic)?;
         }
         Ok(())
     }
 }
 
-impl<'src> Reporter<'src> for TransformResult {
-    fn report_errors(&self, source: &'src util::Source) -> io::Result<()> {
-        for error in &self.errors {
-            let mut colors = ColorGenerator::new();
-            let mut report = Report::build(
-                ariadne::ReportKind::Error,
-                (source.name(), error.span().into()),
-            )
-            .with_message(error.message());
-            report = report.with_labels(error.labels(source, &mut colors));
-            report
-                .finish()
-                .eprint((source.name(), Source::from(source.source())))?;
-        }
-        Ok(())
-    }
+fn render_diagnostic(source: &Source, diagnostic: &Diagnostic) -> io::Result<()> {
+    let mut colors = ColorGenerator::new();
+    let span = diagnostic.primary_span.map_or(0..0, Range::<usize>::from);
+    let kind = match diagnostic.severity {
+        DiagnosticSeverity::Advice => ariadne::ReportKind::Advice,
+        DiagnosticSeverity::Warning => ariadne::ReportKind::Warning,
+        DiagnosticSeverity::Error => ariadne::ReportKind::Error,
+    };
 
-    fn report_warnings(&self, source: &'src util::Source) -> io::Result<()> {
-        for warning in &self.warnings {
-            let mut colors = ColorGenerator::new();
-            let mut report = Report::build(
-                ariadne::ReportKind::Warning,
-                (source.name(), warning.span().into()),
-            )
-            .with_message(warning.message());
-            report = report.with_labels(warning.labels(source, &mut colors));
-            report
-                .finish()
-                .eprint((source.name(), Source::from(source.source())))?;
-        }
-        Ok(())
-    }
-}
-
-impl<'src> Reporter<'src> for SemanticAnalysisResult {
-    fn report_errors(&self, source: &'src util::Source) -> io::Result<()> {
-        for e in &self.errors {
-            let mut colors = ColorGenerator::new();
-            let mut report =
-                Report::build(ariadne::ReportKind::Error, (source.name(), e.span().into()))
-                    .with_message(e.message());
-            report = report.with_labels(e.labels(source, &mut colors));
-            report
-                .finish()
-                .eprint((source.name(), Source::from(source.source())))?;
-        }
-        Ok(())
-    }
-
-    fn report_warnings(&self, source: &'src util::Source) -> io::Result<()> {
-        for w in &self.warnings {
-            let mut colors = ColorGenerator::new();
-            let mut report = Report::build(ariadne::ReportKind::Warning, (source.name(), 0..0))
-                .with_message(w.message());
-            report = report.with_labels(w.labels(source, &mut colors));
-            report
-                .finish()
-                .eprint((source.name(), Source::from(source.source())))?;
-        }
-        Ok(())
-    }
-
-    fn report(&self, source: &'src util::Source) -> io::Result<()> {
-        self.report_warnings(source)?;
-        self.report_errors(source)
-    }
-}
-
-impl<'src> Reporter<'src> for LexingResult {
-    fn report_errors(&self, source: &'src util::Source) -> io::Result<()> {
-        for e in &self.errors {
-            let mut colors = ColorGenerator::new();
-            let mut report = Report::build(
-                ariadne::ReportKind::Error,
-                (source.name(), e.pos.as_range()),
-            )
-            .with_message(e.message());
-            report = report.with_labels(e.labels(source, &mut colors));
-            report
-                .finish()
-                .eprint((source.name(), Source::from(source.source())))?;
-        }
-
-        Ok(())
-    }
-}
-
-impl<'src> Reporter<'src> for ParsingResult {
-    fn report_warnings(&self, source: &'src util::Source) -> io::Result<()> {
-        for warn in &self.parsing_warnings {
-            let mut colors = ColorGenerator::new();
-            let mut report = Report::build(
-                ariadne::ReportKind::Warning,
-                (source.name(), warn.span.into()),
-            )
-            .with_message(warn.message());
-            report = report.with_labels(warn.labels(source, &mut colors));
-            report
-                .finish()
-                .eprint((source.name(), Source::from(source.source())))?;
-        }
-
-        Ok(())
-    }
-
-    fn report_errors(&self, source: &'src util::Source) -> io::Result<()> {
-        for e in &self.parsing_errors {
-            let mut colors = ColorGenerator::new();
-            let mut report =
-                Report::build(ariadne::ReportKind::Error, (source.name(), e.span.into()))
-                    .with_message(e.message());
-            report = report.with_labels(e.labels(source, &mut colors));
-            report
-                .finish()
-                .eprint((source.name(), Source::from(source.source())))?;
-        }
-
-        Ok(())
-    }
-}
-
-impl Reportable for LexError {
-    fn message(&self) -> String {
-        match self.ty {
-            lexing::LexErrorType::Expected(c) => {
-                format!("Expected character '{}'", c.to_string().fg(Color::Blue))
-            }
-            lexing::LexErrorType::UnexpectedCharacter(c) => {
-                format!("Unexpected {}", c.to_string().fg(Color::Red))
-            }
-            lexing::LexErrorType::UncompleteNumber => "Uncomplete number".to_owned(),
-            lexing::LexErrorType::UncompleteString => "Uncomplete string".to_owned(),
-            lexing::LexErrorType::UnclosedQuote => "Unclosed quote".to_owned(),
-            lexing::LexErrorType::UnclosedComment => "Unclosed comment".to_owned(),
-            lexing::LexErrorType::UnmatchedBracket(c, _) => {
-                format!("Unmatched bracket '{}'", c.to_string().fg(Color::Blue))
-            }
-        }
-    }
-
-    fn labels<'a>(
-        &'a self,
-        source: &'a util::Source,
-        colors: &mut ColorGenerator,
-    ) -> Vec<Label<(&'a str, Range<usize>)>> {
-        let mut labels = vec![];
-        match self.ty {
-            LexErrorType::UnmatchedBracket(_, offset) => {
-                let offset = offset.as_u32() as usize;
-                let label = Label::new((source.name(), offset..offset + 1))
-                    .with_message("Did you forget to close the bracket here?".to_string())
-                    .with_color(colors.next());
-                labels.push(label);
-            }
-            _ => {
-                let offset = self.pos.as_u32() as usize;
-                let label = Label::new((source.name(), offset..offset + 1))
-                    .with_message("At here".to_string())
-                    .with_color(colors.next());
-                labels.push(label);
-            }
-        }
-        labels
-    }
-}
-
-impl Reportable for ParseError {
-    fn labels<'a>(
-        &'a self,
-        source: &'a util::Source,
-        colors: &mut ColorGenerator,
-    ) -> Vec<Label<(&'a str, Range<usize>)>> {
-        vec![Label::new((source.name(), self.span.into()))
-            .with_message(self.message())
-            .with_color(colors.next())]
-    }
-
-    fn message(&self) -> String {
-        match &self.ty {
-            ParseErrorType::UnexpectedToken { expected, found } => {
-                format!(
-                    "Expected {}, but found {}",
-                    expected.to_string().fg(Color::Blue),
-                    found.to_string().fg(Color::Red)
-                )
-            }
-            ParseErrorType::UnexpectedEOF => "Unexpected end of file".to_string(),
-            ParseErrorType::ExpectAnItem => "Expect an item".to_string(),
-        }
-    }
-}
-
-impl Reportable for ParseWarning {
-    fn labels<'a>(
-        &'a self,
-        source: &'a util::Source,
-        colors: &mut ColorGenerator,
-    ) -> Vec<Label<(&'a str, Range<usize>)>> {
-        vec![Label::new((source.name(), self.span.into()))
-            .with_message(self.message())
-            .with_color(colors.next())]
-    }
-
-    fn message(&self) -> String {
-        match &self.ty {
-            parsing::ParseWarningType::MissingCommaBetweenProcesses => {
-                "Missing comma between processes".to_string()
-            }
-            parsing::ParseWarningType::MissingPeriodAtTheEnd => {
-                "Missing period at the end of the process".to_string()
-            }
-        }
-    }
-}
-
-impl Reportable for TransformError {
-    fn labels<'a>(
-        &'a self,
-        source: &'a util::Source,
-        colors: &mut ColorGenerator,
-    ) -> Vec<Label<(&'a str, Range<usize>)>> {
-        vec![Label::new((source.name(), self.span().into()))
-            .with_message(self.message())
-            .with_color(colors.next())]
-    }
-
-    fn message(&self) -> String {
-        match self {
-            TransformError::TopLevelLink { .. } => "Top level link is not supported".to_string(),
-            TransformError::UnsupportedProcessContext { .. } => {
-                "Process contexts are not supported yet".to_string()
-            }
-            TransformError::UnsupportedRuleContext { .. } => {
-                "Rule contexts are not supported yet".to_string()
-            }
-            TransformError::UnsupportedNestedRule { .. } => {
-                "Rules inside membranes are not supported yet".to_string()
-            }
-            TransformError::UnsupportedProcessInAtom { process, .. } => {
-                format!("{} is not supported in atom arguments", process)
-            }
-            TransformError::UnsupportedGuard { message, .. } => message.clone(),
-            TransformError::UnknownGuardFunction { name, .. } => {
-                format!("Unknown guard function {}", name)
-            }
-            TransformError::UnsupportedGuardConstraint { constraint, .. } => {
-                format!(
-                    "Constraint {} is not supported by code generation yet",
-                    constraint
-                )
-            }
-            TransformError::UnconstrainedLink { link, .. } => {
-                format!("Link {} is unconstrained", link)
-            }
-            TransformError::LinkTooManyOccurrence { link, .. } => {
-                format!("Link {} occurs too many times", link)
-            }
-            TransformError::GuardTypeMismatch {
-                expected, found, ..
-            } => format!(
-                "Guard type mismatch: expected {}, found {}",
-                expected, found
-            ),
-        }
-    }
-}
-
-impl Reportable for TransformWarning {
-    fn labels<'a>(
-        &'a self,
-        source: &'a util::Source,
-        colors: &mut ColorGenerator,
-    ) -> Vec<Label<(&'a str, Range<usize>)>> {
-        vec![Label::new((source.name(), self.span().into()))
-            .with_message(self.message())
-            .with_color(colors.next())]
-    }
-
-    fn message(&self) -> String {
-        match self {
-            TransformWarning::UnusedVariable { name, .. } => {
-                format!("Guard variable {} is never used", name)
-            }
-        }
-    }
-}
-
-impl Reportable for SemanticError {
-    fn labels<'a>(
-        &'a self,
-        source: &'a util::Source,
-        colors: &mut ColorGenerator,
-    ) -> Vec<Label<(&'a str, Range<usize>)>> {
-        let mut labels = vec![];
-        match self {
-            SemanticError::MultipleLinkOccurrence { spans, .. } => {
-                let first = spans.first().unwrap();
-                let label = Label::new((source.name(), (*first).into()))
-                    .with_message("This is the first occurrence of this link".to_string())
-                    .with_color(colors.next());
-                labels.push(label);
-
-                for span in spans.iter().skip(1) {
-                    let label = Label::new((source.name(), (*span).into()))
-                        .with_message("These are the other occurrences of this link".to_string())
-                        .with_color(colors.next());
-                    labels.push(label);
-                }
-            }
-            SemanticError::FreeLinkOccurrence { span, .. } => {
-                let label = Label::new((source.name(), (*span).into()))
-                    .with_message("At here".to_string())
-                    .with_color(colors.next());
-                labels.push(label);
-            }
-            SemanticError::TopLevelLinkOccurrence { span, .. } => {
-                let label = Label::new((source.name(), (*span).into()))
-                    .with_message("At here".to_string())
-                    .with_color(colors.next());
-                labels.push(label)
-            }
-            SemanticError::MembraneInAtomArgument { span } => {
-                let label = Label::new((source.name(), (*span).into()))
-                    .with_message("At here".to_string())
-                    .with_color(colors.next());
-                labels.push(label)
-            }
-        }
-        labels
-    }
-
-    fn message(&self) -> String {
-        match self {
-            SemanticError::MultipleLinkOccurrence { link, .. } => {
-                format!("Multiple occurrence of link {}", link)
-            }
-            SemanticError::FreeLinkOccurrence { link, .. } => {
-                format!("Free link {} is not allowed", link)
-            }
-            SemanticError::TopLevelLinkOccurrence { .. } => {
-                "Top level link is not allowed".to_string()
-            }
-            SemanticError::MembraneInAtomArgument { .. } => {
-                "Membrane is not allowed in atom argument".to_string()
-            }
-        }
-    }
-}
-
-impl Reportable for SemanticWarning {
-    #[allow(unused_variables)]
-    fn labels<'a>(
-        &'a self,
-        source: &'a util::Source,
-        colors: &mut ColorGenerator,
-    ) -> Vec<Label<(&'a str, Range<usize>)>> {
-        match self {
-            SemanticWarning::NoInitialProcess => {
-                vec![]
-            }
-        }
-    }
-
-    fn message(&self) -> String {
-        match self {
-            SemanticWarning::NoInitialProcess => "No initial process".to_string(),
-        }
-    }
+    let mut report = Report::build(kind, (source.name(), span)).with_message(&diagnostic.message);
+    let labels = diagnostic
+        .related_spans
+        .iter()
+        .map(|related| {
+            Label::new((source.name(), Range::<usize>::from(related.span)))
+                .with_message(related.message.clone())
+                .with_color(colors.next())
+        })
+        .collect::<Vec<_>>();
+    report = report.with_labels(labels);
+    report
+        .finish()
+        .eprint((source.name(), AriadneSource::from(source.source())))?;
+    Ok(())
 }
