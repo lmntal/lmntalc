@@ -1,7 +1,9 @@
 use clap::ValueEnum;
-use lmntalc_core::diagnostics::{Diagnostic, DiagnosticStage};
-
-use crate::{codegen::IRSet, model::guard::ProcessConstraint};
+use lmntalc_core::{
+    codegen::IRSet,
+    diagnostics::{Diagnostic, DiagnosticStage},
+    model::guard::ProcessConstraint,
+};
 
 mod common;
 pub mod cpp;

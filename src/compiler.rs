@@ -4,7 +4,8 @@ use lmntalc_core::{
     codegen::{Emitter, IRSet},
     diagnostics::{Diagnostic, DiagnosticSeverity},
     lowering::{self, TransformResult},
-    semantics::{analyze, SemanticAnalysisResult},
+    optimization::Optimizer,
+    semantics::{SemanticAnalysisResult, analyze},
     syntax::{lexing, parsing},
     text::Source,
 };
@@ -18,23 +19,51 @@ pub struct CompileOptions {
 
 #[derive(Debug)]
 pub struct Compilation {
-    pub source: Source,
-    pub lexing: lexing::LexingResult,
-    pub parsing: Option<parsing::ParsingResult>,
-    pub analysis: Option<SemanticAnalysisResult>,
-    pub transform: Option<TransformResult>,
-    pub ir: Option<IRSet>,
-    pub code: Option<String>,
-    pub backend_error: Option<BackendError>,
+    source: Source,
+    lexing: lexing::LexingResult,
+    parsing: Option<parsing::ParsingResult>,
+    analysis: Option<SemanticAnalysisResult>,
+    transform: Option<TransformResult>,
+    ir: Option<IRSet>,
+    code: Option<String>,
+    backend_error: Option<BackendError>,
 }
 
 impl Compilation {
+    pub fn source(&self) -> &Source {
+        &self.source
+    }
+
+    pub fn lexing(&self) -> &lexing::LexingResult {
+        &self.lexing
+    }
+
+    pub fn parsing(&self) -> Option<&parsing::ParsingResult> {
+        self.parsing.as_ref()
+    }
+
+    pub fn semantics(&self) -> Option<&SemanticAnalysisResult> {
+        self.analysis.as_ref()
+    }
+
+    pub fn lowering(&self) -> Option<&TransformResult> {
+        self.transform.as_ref()
+    }
+
     pub fn ast(&self) -> Option<&lmntalc_core::syntax::ast::Membrane> {
         self.parsing.as_ref().map(|parsing| &parsing.root)
     }
 
     pub fn ir(&self) -> Option<&IRSet> {
         self.ir.as_ref()
+    }
+
+    pub fn code(&self) -> Option<&str> {
+        self.code.as_deref()
+    }
+
+    pub fn backend_error(&self) -> Option<&BackendError> {
+        self.backend_error.as_ref()
     }
 
     pub fn has_errors(&self) -> bool {
@@ -66,7 +95,25 @@ pub fn compile_file(path: &Path, options: &CompileOptions) -> io::Result<Compila
     Ok(compile_source(source, options))
 }
 
+pub fn compile_file_with_optimizer(
+    path: &Path,
+    options: &CompileOptions,
+    optimizer: &mut Optimizer,
+) -> io::Result<Compilation> {
+    let source = Source::from_file(path)?;
+    Ok(compile_source_with_optimizer(source, options, optimizer))
+}
+
 pub fn compile_source(source: Source, options: &CompileOptions) -> Compilation {
+    let mut optimizer = Optimizer::default_pipeline();
+    compile_source_with_optimizer(source, options, &mut optimizer)
+}
+
+pub fn compile_source_with_optimizer(
+    source: Source,
+    options: &CompileOptions,
+    optimizer: &mut Optimizer,
+) -> Compilation {
     let lexer = lexing::Lexer::new(&source);
     let mut lexing = lexer.lex();
 
@@ -127,7 +174,8 @@ pub fn compile_source(source: Source, options: &CompileOptions) -> Compilation {
 
     let mut emitter = Emitter::new();
     emitter.generate(&transform.program);
-    let ir = emitter.finish();
+    let mut ir = emitter.finish();
+    optimizer.optimize(&mut ir);
 
     let (code, backend_error) = match options.target {
         Some(target) => match target.emit(&ir) {
@@ -152,8 +200,11 @@ pub fn compile_source(source: Source, options: &CompileOptions) -> Compilation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ir::LMNtalIR, transform::TransformError};
     use lmntalc_core::diagnostics::DiagnosticStage;
+    use lmntalc_core::lowering::TransformError;
+    use lmntalc_core::optimization::{OptimizationPass, Optimizer};
+
+    use crate::ir::LMNtalIR;
 
     fn compile_text(source: &str, target: Option<Target>) -> Compilation {
         compile_source(
@@ -166,52 +217,62 @@ mod tests {
     fn rejects_nested_rules_in_membranes() {
         let compilation = compile_text("{a(X,b,Y),c(X,Y). a,b,c :- e}.", None);
         let transform = compilation
-            .transform
+            .lowering()
             .expect("transform result should exist");
-        assert!(transform
-            .errors
-            .iter()
-            .any(|error| matches!(error, TransformError::UnsupportedNestedRule { .. })));
+        assert!(
+            transform
+                .errors
+                .iter()
+                .any(|error| matches!(error, TransformError::UnsupportedNestedRule { .. }))
+        );
     }
 
     #[test]
     fn rejects_rule_and_process_contexts_early() {
         let compilation = compile_text("b{@rule, $p[A, B | *K]} :- int(A) | c(A).", None);
         let transform = compilation
-            .transform
+            .lowering()
             .expect("transform result should exist");
-        assert!(transform
-            .errors
-            .iter()
-            .any(|error| matches!(error, TransformError::UnsupportedRuleContext { .. })));
-        assert!(transform
-            .errors
-            .iter()
-            .any(|error| matches!(error, TransformError::UnsupportedProcessContext { .. })));
+        assert!(
+            transform
+                .errors
+                .iter()
+                .any(|error| matches!(error, TransformError::UnsupportedRuleContext { .. }))
+        );
+        assert!(
+            transform
+                .errors
+                .iter()
+                .any(|error| matches!(error, TransformError::UnsupportedProcessContext { .. }))
+        );
     }
 
     #[test]
     fn rejects_unsupported_guard_constraints() {
         let compilation = compile_text("a(X) :- ground(X) | b(X).", None);
         let transform = compilation
-            .transform
+            .lowering()
             .expect("transform result should exist");
-        assert!(transform
-            .errors
-            .iter()
-            .any(|error| matches!(error, TransformError::UnsupportedGuardConstraint { .. })));
+        assert!(
+            transform
+                .errors
+                .iter()
+                .any(|error| matches!(error, TransformError::UnsupportedGuardConstraint { .. }))
+        );
     }
 
     #[test]
     fn reports_unconstrained_links_from_transform_solver() {
         let compilation = compile_text("a(X) :- int(X) | b(Y).", None);
         let transform = compilation
-            .transform
+            .lowering()
             .expect("transform result should exist");
-        assert!(transform
-            .errors
-            .iter()
-            .any(|error| matches!(error, TransformError::UnconstrainedLink { .. })));
+        assert!(
+            transform
+                .errors
+                .iter()
+                .any(|error| matches!(error, TransformError::UnconstrainedLink { .. }))
+        );
     }
 
     #[test]
@@ -228,10 +289,12 @@ mod tests {
     fn solver_outputs_unify_ir_for_body_equalities() {
         let compilation = compile_text("name @@ a(X,Y) :- X = Y. a(1,2).", None);
         let ir = compilation.ir.expect("ir should exist");
-        assert!(ir.rules[0].cases[0]
-            .body
-            .iter()
-            .any(|ir| matches!(ir, LMNtalIR::Unify { .. })));
+        assert!(
+            ir.rules[0].cases[0]
+                .body
+                .iter()
+                .any(|ir| matches!(ir, LMNtalIR::Unify { .. }))
+        );
     }
 
     #[test]
@@ -243,7 +306,7 @@ mod tests {
                 !compilation.has_errors(),
                 "target {target:?} should compile cleanly"
             );
-            let code = compilation.code.expect("backend output should exist");
+            let code = compilation.code().expect("backend output should exist");
             match target {
                 Target::Cpp => {
                     assert!(code.contains("int main()"));
@@ -308,5 +371,40 @@ mod tests {
                     .message
                     .contains("Constraint ground is not supported by code generation yet")
         }));
+    }
+
+    #[derive(Default)]
+    struct RenameRulePass;
+
+    impl OptimizationPass for RenameRulePass {
+        fn name(&self) -> &'static str {
+            "rename-rule"
+        }
+
+        fn optimize(&mut self, ir: &mut IRSet) {
+            if let Some(rule) = ir.rules.first_mut() {
+                rule.name = "optimized_rule".to_string();
+            }
+        }
+    }
+
+    #[test]
+    fn custom_optimizer_runs_before_backend_emission() {
+        let source = Source::from_string("name @@ a :- b. a.".to_string());
+        let mut optimizer = Optimizer::new();
+        optimizer.add_pass(RenameRulePass);
+
+        let compilation = compile_source_with_optimizer(
+            source,
+            &CompileOptions {
+                target: Some(Target::Python),
+            },
+            &mut optimizer,
+        );
+
+        let ir = compilation.ir().expect("ir should exist");
+        assert_eq!(ir.rules[0].name, "optimized_rule");
+        let code = compilation.code().expect("backend output should exist");
+        assert!(code.contains("optimized_rule"));
     }
 }

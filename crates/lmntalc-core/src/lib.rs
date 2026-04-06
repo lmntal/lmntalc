@@ -3,6 +3,7 @@ pub mod diagnostics;
 pub mod ir;
 pub mod lowering;
 pub mod model;
+pub mod optimization;
 pub mod semantics;
 pub mod syntax;
 pub mod text;

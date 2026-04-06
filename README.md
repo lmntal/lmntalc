@@ -2,6 +2,19 @@
 
 [LMNtal](https://www.ueda.info.waseda.ac.jp/lmntal/index.php) compiler written in Rust (WIP).
 
+## Workspace
+
+This repository is a Rust workspace with the following crates:
+
+- `lmntalc`
+  The supported compiler library and CLI surface.
+- `lmntalc-core`
+  Internal backend-neutral compiler stages and shared diagnostics.
+- `lmntalc-ide`
+  Internal editor-analysis layer used by the embedded language server.
+- `lmntal-language-server`
+  The supported LMNtal language-server surface, maintained in this repository under `crates/lmntal-language-server`.
+
 ## Installation
 
 ### Install from crates.io
@@ -10,12 +23,24 @@
 cargo install lmntalc
 ```
 
+To install the language server from this workspace:
+
+```sh
+cargo install --path crates/lmntal-language-server
+```
+
 ### Install from source
 
 ```sh
 git clone https://github.com/lmntal/lmntalc.git
 cd lmntalc
 cargo install --path .
+```
+
+To build or run the language server from source:
+
+```sh
+cargo run -p lmntal-language-server
 ```
 
 ## Usage

@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
 use crate::{
-    model::{guard::ProcessConstraint, Data},
+    model::{Data, guard::ProcessConstraint},
     syntax::token::Operator,
 };
 

@@ -1,15 +1,16 @@
-use crate::{
+use lmntalc_core::{
     codegen::{
-        rule::{Case, RuleIR},
         IRSet,
+        rule::{Case, RuleIR},
     },
-    ir::{BinaryOperator, LMNtalIR, UnaryOperator},
-    model::{guard::ProcessConstraint, Data},
+    model::{Data, guard::ProcessConstraint},
 };
 
+use crate::ir::{BinaryOperator, LMNtalIR, UnaryOperator};
+
 use super::{
-    common::{print_operation, BackendState, Dialect},
     Backend, BackendError,
+    common::{BackendState, Dialect, print_operation},
 };
 
 static LMNTAL: &[u8] = include_bytes!("../../assets/lib/cpp/lmntal.hpp");

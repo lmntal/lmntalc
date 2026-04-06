@@ -1,9 +1,8 @@
 use std::collections::HashMap;
 
-use crate::{
-    ir::{BinaryOperator, Literal, Operation, UnaryOperator, VarSource},
-    model::guard::{self, ProcessConstraint},
-};
+use lmntalc_core::model::guard::{self, ProcessConstraint};
+
+use crate::ir::{BinaryOperator, Literal, Operation, UnaryOperator, VarSource};
 
 use super::BackendError;
 

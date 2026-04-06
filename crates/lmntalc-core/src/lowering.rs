@@ -2,10 +2,10 @@ mod guard;
 
 use crate::{
     model::{
+        Atom, Data, Link, Membrane, Process, Program,
         guard::ProcessConstraint,
         id::{AtomId, MembraneId},
         rule::Rule,
-        Atom, Data, Link, Membrane, Process, Program,
     },
     syntax::ast::{
         Atom as AstAtom, AtomName, Membrane as AstMembrane, Process as AstProcess, ProcessList,

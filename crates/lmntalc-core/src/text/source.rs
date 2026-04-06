@@ -65,15 +65,29 @@ impl Source {
         let col = offset - self.lines[line];
         (line, col)
     }
+
+    pub fn offset_at(&self, line: u32, column: u32) -> Option<usize> {
+        let line = line as usize;
+        let column = column as usize;
+        let start = *self.lines.get(line)?;
+        let source_len = self.source.chars().count();
+        let is_last_line = line + 1 >= self.lines.len();
+        let line_end = self.lines.get(line + 1).copied().unwrap_or(source_len);
+
+        if is_last_line {
+            (column <= line_end.saturating_sub(start)).then_some(start + column)
+        } else {
+            (column < line_end.saturating_sub(start)).then_some(start + column)
+        }
+    }
 }
 
 fn build_line_index(source: &str) -> Vec<usize> {
-    source
-        .lines()
-        .scan(0, |state, line| {
-            let start = *state;
-            *state += line.len() + 1;
-            Some(start)
-        })
-        .collect()
+    let mut lines = vec![0];
+    for (offset, ch) in source.chars().enumerate() {
+        if ch == '\n' {
+            lines.push(offset + 1);
+        }
+    }
+    lines
 }

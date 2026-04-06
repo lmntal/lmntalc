@@ -1160,12 +1160,16 @@ fn test_parse_process_list() {
 #[test]
 fn test_parse_rule_or_process_list() {
     assert!(common_init("a(X,b,Y),c(X,Y)", |p| p.parse_rule_or_process_list()).is_ok());
-    assert!(common_init("name @@ a(X,b,Y) :- int(A) | c(X,Y)", |p| p
-        .parse_rule_or_process_list())
-    .is_ok());
-    assert!(common_init("a(X,b,Y) :- int(A) | c(X,Y)", |p| p
-        .parse_rule_or_process_list())
-    .is_ok());
+    assert!(
+        common_init("name @@ a(X,b,Y) :- int(A) | c(X,Y)", |p| p
+            .parse_rule_or_process_list())
+        .is_ok()
+    );
+    assert!(
+        common_init("a(X,b,Y) :- int(A) | c(X,Y)", |p| p
+            .parse_rule_or_process_list())
+        .is_ok()
+    );
 }
 
 #[test]

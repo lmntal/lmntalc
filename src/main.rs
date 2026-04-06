@@ -56,7 +56,7 @@ fn main() -> io::Result<()> {
         },
     )?;
 
-    compilation.report(&compilation.source)?;
+    compilation.report(compilation.source())?;
 
     if cli.dump_ast
         && let Some(ast) = compilation.ast()
@@ -83,7 +83,7 @@ fn main() -> io::Result<()> {
         file_name
     });
 
-    if let Some(code) = compilation.code {
+    if let Some(code) = compilation.code() {
         std::fs::write(&output_file_name, code)?;
     }
 

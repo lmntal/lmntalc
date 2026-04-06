@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     model::{
-        guard::{Guard, GuardNode, GuardSource, ProcessConstraint, VariableId, RESERVED_FUNC},
+        guard::{Guard, GuardNode, GuardSource, ProcessConstraint, RESERVED_FUNC, VariableId},
         rule::Rule,
     },
     syntax::{
@@ -227,19 +227,19 @@ fn constraint_from_keyword(s: &str, span: Span) -> Result<ProcessConstraint, Tra
             return Err(TransformError::UnsupportedGuardConstraint {
                 span,
                 constraint: ProcessConstraint::Ground,
-            })
+            });
         }
         "uniq" => {
             return Err(TransformError::UnsupportedGuardConstraint {
                 span,
                 constraint: ProcessConstraint::Unique,
-            })
+            });
         }
         _ => {
             return Err(TransformError::UnsupportedGuard {
                 span,
                 message: format!("illegal type constraint {s}"),
-            })
+            });
         }
     };
     Ok(constraint)

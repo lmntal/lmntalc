@@ -1,10 +1,15 @@
+mod language;
+mod outline;
+mod reference;
+mod semantic;
+
 use std::collections::HashMap;
 
+use language::{LanguageInfo, build_language_info};
 use lmntalc_core::{
     codegen::{Emitter, IRSet},
-    diagnostics::Diagnostic,
     lowering::{self, TransformResult},
-    semantics::{analyze, SemanticAnalysisResult},
+    semantics::{SemanticAnalysisResult, analyze},
     syntax::{
         ast::{
             Atom, Hyperlink, Link, LinkBundle, Membrane, Process, ProcessContext, ProcessList,
@@ -13,8 +18,13 @@ use lmntalc_core::{
         lexing::{Lexer, LexingResult},
         parsing::{Parser, ParsingResult},
     },
-    text::{Source, Span},
 };
+
+pub use lmntalc_core::diagnostics::{Diagnostic, DiagnosticSeverity, DiagnosticStage, RelatedSpan};
+pub use lmntalc_core::text::{Pos, Source, Span};
+pub use outline::{OutlineKind, OutlineSymbol};
+pub use reference::ReferenceIndex;
+pub use semantic::{SemanticKind, SemanticSpan};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnalysisDepth {
@@ -34,19 +44,6 @@ impl Default for AnalysisConfig {
             depth: AnalysisDepth::Semantic,
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DocumentSymbolKind {
-    InitialProcess,
-    Rule,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DocumentSymbol {
-    pub name: String,
-    pub kind: DocumentSymbolKind,
-    pub span: Span,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,6 +76,7 @@ pub struct DocumentSnapshot {
     semantics: Option<SemanticAnalysisResult>,
     lowering: Option<TransformResult>,
     ir: Option<IRSet>,
+    language: Option<LanguageInfo>,
 }
 
 impl DocumentSnapshot {
@@ -128,36 +126,36 @@ impl DocumentSnapshot {
         diagnostics
     }
 
-    pub fn top_level_symbols(&self) -> Vec<DocumentSymbol> {
-        let Some(parsing) = &self.parsing else {
-            return Vec::new();
-        };
+    pub fn offset_at(&self, line: u32, column: u32) -> Option<usize> {
+        offset_at(self.source(), line, column)
+    }
 
-        let mut symbols = Vec::new();
-        if !parsing.root.process_lists.is_empty() {
-            let span = parsing
-                .root
-                .process_lists
-                .iter()
-                .map(|process_list| process_list.span)
-                .reduce(|lhs, rhs| lhs.merge(rhs))
-                .unwrap_or(parsing.root.span);
-            symbols.push(DocumentSymbol {
-                name: "init".to_string(),
-                kind: DocumentSymbolKind::InitialProcess,
-                span,
-            });
-        }
+    pub fn outline(&self) -> &[OutlineSymbol] {
+        self.language
+            .as_ref()
+            .map(LanguageInfo::outline)
+            .unwrap_or(&[])
+    }
 
-        for rule in &parsing.root.rules {
-            symbols.push(DocumentSymbol {
-                name: rule.name.0.clone(),
-                kind: DocumentSymbolKind::Rule,
-                span: rule.span,
-            });
-        }
+    pub fn semantic_spans(&self) -> &[SemanticSpan] {
+        self.language
+            .as_ref()
+            .map(LanguageInfo::semantic_spans)
+            .unwrap_or(&[])
+    }
 
-        symbols
+    pub fn references_at_offset(&self, offset: usize) -> Vec<Span> {
+        self.language
+            .as_ref()
+            .map(|language| language.reference_index().references_at_offset(offset))
+            .unwrap_or_default()
+    }
+
+    pub fn highlights_at_offset(&self, offset: usize) -> Vec<Span> {
+        self.language
+            .as_ref()
+            .map(|language| language.reference_index().highlights_at_offset(offset))
+            .unwrap_or_default()
     }
 
     pub fn node_at_offset(&self, offset: usize) -> Option<SyntaxNode> {
@@ -236,6 +234,10 @@ fn build_snapshot(
         None
     };
 
+    let language = parsing
+        .as_ref()
+        .map(|parsing| build_language_info(&parsing.root));
+
     let semantics = parsing
         .as_ref()
         .filter(|parsing| parsing.parsing_errors.is_empty())
@@ -274,11 +276,39 @@ fn build_snapshot(
         semantics,
         lowering,
         ir,
+        language,
     }
 }
 
 fn document_name(uri: &str) -> String {
     uri.rsplit('/').next().unwrap_or(uri).to_string()
+}
+
+fn offset_at(source: &Source, line: u32, column: u32) -> Option<usize> {
+    let target_line = line as usize;
+    let target_column = column as usize;
+
+    let mut current_line = 0usize;
+    let mut current_column = 0usize;
+
+    for (offset, ch) in source.source().chars().enumerate() {
+        if current_line == target_line && current_column == target_column {
+            return Some(offset);
+        }
+
+        if ch == '\n' {
+            current_line += 1;
+            current_column = 0;
+        } else {
+            current_column += 1;
+        }
+    }
+
+    if current_line == target_line && current_column == target_column {
+        Some(source.source().chars().count())
+    } else {
+        None
+    }
 }
 
 fn span_contains_offset(span: Span, offset: usize) -> bool {
@@ -437,16 +467,17 @@ fn node_specificity(kind: SyntaxNodeKind) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lmntalc_core::diagnostics::DiagnosticStage;
+
+    fn snapshot<'a>(session: &'a AnalysisSession, uri: &str) -> &'a DocumentSnapshot {
+        session.snapshot(uri).expect("snapshot should exist")
+    }
 
     #[test]
     fn supports_non_file_uris() {
         let mut session = AnalysisSession::new();
         session.set_document("untitled://scratch", 1, "a.");
 
-        let snapshot = session
-            .snapshot("untitled://scratch")
-            .expect("snapshot should exist");
+        let snapshot = snapshot(&session, "untitled://scratch");
         assert_eq!(snapshot.source().uri(), "untitled://scratch");
         assert_eq!(snapshot.source().name(), "scratch");
     }
@@ -455,20 +486,22 @@ mod tests {
     fn open_update_remove_flow_refreshes_snapshots() {
         let mut session = AnalysisSession::new();
         session.set_document("file:///test.lmn", 1, "a :-");
-        assert!(session
-            .diagnostics("file:///test.lmn")
-            .iter()
-            .any(|diagnostic| diagnostic.stage == DiagnosticStage::Parsing));
+        assert!(
+            session
+                .diagnostics("file:///test.lmn")
+                .iter()
+                .any(|diagnostic| diagnostic.stage == DiagnosticStage::Parsing)
+        );
 
         session.set_document("file:///test.lmn", 2, "a.");
-        let snapshot = session
-            .snapshot("file:///test.lmn")
-            .expect("snapshot should exist");
+        let snapshot = snapshot(&session, "file:///test.lmn");
         assert_eq!(snapshot.version(), 2);
-        assert!(session
-            .diagnostics("file:///test.lmn")
-            .iter()
-            .all(|diagnostic| diagnostic.stage != DiagnosticStage::Parsing));
+        assert!(
+            session
+                .diagnostics("file:///test.lmn")
+                .iter()
+                .all(|diagnostic| diagnostic.stage != DiagnosticStage::Parsing)
+        );
 
         assert!(session.remove_document("file:///test.lmn").is_some());
         assert!(session.snapshot("file:///test.lmn").is_none());
@@ -479,9 +512,7 @@ mod tests {
         let mut session = AnalysisSession::new();
         session.set_document("file:///depth.lmn", 1, "a.");
 
-        let snapshot = session
-            .snapshot("file:///depth.lmn")
-            .expect("snapshot should exist");
+        let snapshot = snapshot(&session, "file:///depth.lmn");
         assert!(snapshot.semantics().is_some());
         assert!(snapshot.lowering().is_none());
         assert!(snapshot.ir().is_none());
@@ -494,29 +525,105 @@ mod tests {
         });
         session.set_document("file:///ir.lmn", 1, "name @@ a :- b. a.");
 
-        let snapshot = session
-            .snapshot("file:///ir.lmn")
-            .expect("snapshot should exist");
+        let snapshot = snapshot(&session, "file:///ir.lmn");
         assert!(snapshot.lowering().is_some());
         assert!(snapshot.ir().is_some());
     }
 
     #[test]
-    fn exposes_symbols_and_node_queries() {
+    fn outline_generation_includes_init_rules_and_membrane_nesting() {
+        let mut session = AnalysisSession::new();
+        let source = "m{n{a}. inner @@ b :- c}. outer @@ d :- e. a.";
+        session.set_document("file:///outline.lmn", 1, source);
+
+        let outline = snapshot(&session, "file:///outline.lmn").outline();
+        assert_eq!(outline.len(), 2);
+        assert_eq!(outline[0].kind, OutlineKind::InitialProcess);
+        assert_eq!(outline[0].name, "init");
+        assert_eq!(outline[0].children.len(), 1);
+        assert_eq!(outline[0].children[0].kind, OutlineKind::Membrane);
+        assert_eq!(outline[0].children[0].name, "m");
+        assert_eq!(outline[0].children[0].children.len(), 2);
+        assert!(
+            outline[0].children[0]
+                .children
+                .iter()
+                .any(|child| child.kind == OutlineKind::Membrane && child.name == "n")
+        );
+        assert!(
+            outline[0].children[0]
+                .children
+                .iter()
+                .any(|child| child.kind == OutlineKind::Rule && child.name == "inner")
+        );
+        assert_eq!(outline[1].kind, OutlineKind::Rule);
+        assert_eq!(outline[1].name, "outer");
+    }
+
+    #[test]
+    fn semantic_spans_cover_current_categories() {
+        let mut session = AnalysisSession::new();
+        let samples = [
+            ("file:///rule.lmn", "name @@ a :- b."),
+            ("file:///membrane.lmn", "m{a}."),
+            ("file:///atom.lmn", "a."),
+            ("file:///refs.lmn", "a(X,!H), b(X,!H)."),
+            ("file:///context.lmn", "b{@rule, $p[A, B | *K]}."),
+            ("file:///keyword.lmn", "int(A)."),
+            ("file:///operator.lmn", "a(1 + 2)."),
+            ("file:///string.lmn", "a(#\"s\")."),
+            ("file:///number.lmn", "a(1)."),
+        ];
+
+        for (uri, source) in samples {
+            session.set_document(uri, 1, source);
+        }
+
+        let mut kinds = Vec::new();
+        for (uri, _) in samples {
+            kinds.extend(
+                snapshot(&session, uri)
+                    .semantic_spans()
+                    .iter()
+                    .map(|span| span.kind),
+            );
+        }
+
+        assert!(kinds.contains(&SemanticKind::Rule));
+        assert!(kinds.contains(&SemanticKind::Membrane));
+        assert!(kinds.contains(&SemanticKind::Atom));
+        assert!(kinds.contains(&SemanticKind::Link));
+        assert!(kinds.contains(&SemanticKind::Hyperlink));
+        assert!(kinds.contains(&SemanticKind::Context));
+        assert!(kinds.contains(&SemanticKind::KeywordAtom));
+        assert!(kinds.contains(&SemanticKind::OperatorAtom));
+        assert!(kinds.contains(&SemanticKind::StringAtom));
+        assert!(kinds.contains(&SemanticKind::NumberAtom));
+    }
+
+    #[test]
+    fn references_and_highlights_follow_link_and_hyperlink_pairs() {
+        let mut session = AnalysisSession::new();
+        let source = "a(X,!H), b(X,!H).";
+        session.set_document("file:///refs.lmn", 1, source);
+        let snapshot = snapshot(&session, "file:///refs.lmn");
+
+        let link_offset = source.find('X').expect("link offset should exist");
+        let hyperlink_offset = source.find("!H").expect("hyperlink offset should exist");
+
+        assert_eq!(snapshot.references_at_offset(link_offset).len(), 2);
+        assert_eq!(snapshot.highlights_at_offset(link_offset).len(), 2);
+        assert_eq!(snapshot.references_at_offset(hyperlink_offset).len(), 2);
+        assert_eq!(snapshot.highlights_at_offset(hyperlink_offset).len(), 2);
+    }
+
+    #[test]
+    fn exposes_node_queries() {
         let mut session = AnalysisSession::new();
         let source = "name @@ a(X) :- b(X). a(1).";
         session.set_document("file:///symbols.lmn", 1, source);
 
-        let snapshot = session
-            .snapshot("file:///symbols.lmn")
-            .expect("snapshot should exist");
-        let symbols = snapshot.top_level_symbols();
-        assert!(symbols.iter().any(|symbol| {
-            symbol.kind == DocumentSymbolKind::InitialProcess && symbol.name == "init"
-        }));
-        assert!(symbols
-            .iter()
-            .any(|symbol| { symbol.kind == DocumentSymbolKind::Rule && symbol.name == "name" }));
+        let snapshot = snapshot(&session, "file:///symbols.lmn");
 
         let atom_offset = source.find("b(X)").expect("offset should exist");
         let node = snapshot
@@ -526,14 +633,26 @@ mod tests {
         assert_eq!(node.name.as_deref(), Some("b"));
 
         let rule_span = snapshot
-            .top_level_symbols()
-            .into_iter()
-            .find(|symbol| symbol.kind == DocumentSymbolKind::Rule)
+            .outline()
+            .iter()
+            .find(|symbol| symbol.kind == OutlineKind::Rule)
             .expect("rule symbol should exist")
             .span;
         let node = snapshot
             .node_at_span(rule_span)
             .expect("node should exist at span");
         assert_eq!(node.kind, SyntaxNodeKind::Rule);
+    }
+
+    #[test]
+    fn converts_position_to_offset() {
+        let mut session = AnalysisSession::new();
+        session.set_document("file:///offset.lmn", 1, "a(\n b).");
+
+        let snapshot = snapshot(&session, "file:///offset.lmn");
+        assert_eq!(snapshot.offset_at(0, 0), Some(0));
+        assert_eq!(snapshot.offset_at(1, 1), Some(4));
+        assert_eq!(snapshot.offset_at(1, 3), Some(6));
+        assert_eq!(snapshot.offset_at(2, 0), None);
     }
 }

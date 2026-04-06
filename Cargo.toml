@@ -1,16 +1,17 @@
 [workspace]
-members = ["crates/lmntalc-core", "crates/lmntalc-ide"]
+members = ["crates/lmntalc-core", "crates/lmntalc-ide", "crates/lmntal-language-server"]
 resolver = "2"
 
 [workspace.package]
-version = "0.13.0"
+version = "0.13.1"
 edition = "2024"
 license = "MIT"
 authors = ["QRWells <qirui.wang@moegi.waseda.jp>"]
 repository = "https://github.com/lmntal/lmntalc"
 
 [workspace.dependencies]
-lmntalc-core = { version = "0.13.0", path = "crates/lmntalc-core" }
+lmntalc-core = { version = "0.13.1", path = "crates/lmntalc-core" }
+lmntalc-ide = { version = "0.13.1", path = "crates/lmntalc-ide" }
 
 [package]
 name = "lmntalc"
